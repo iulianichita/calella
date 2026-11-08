@@ -5,6 +5,8 @@
     --border: #d2d2d7;
     --blue: #0071e3;
     --blue-hover: #0077ed;
+    --green: rgb(133, 206, 84);
+    --green-hover: rgb(125, 198, 77);
     --dark-card: #2a2a2f;
     --dark-border: #424245;
 }
@@ -71,6 +73,7 @@ ul { list-style: none; }
 .nav.is-scrolled .nav-links a {
     font-size: 14px;
 }
+.nav-links a.btn:hover {color: var(--green-hover);}
 
 /* Buttons */
 .btn {
@@ -84,11 +87,11 @@ ul { list-style: none; }
 .btn:active { transform: scale(0.95); }
 .btn-small { padding: 7px 18px; font-size: 13px; background: #fff; }
 .btn-light { background: #fff; color: #000; }
-.btn-light:hover { background: var(--gray-bg); transform: scale(1.05); box-shadow: 0 10px 20px rgba(255,255,255,0.1); }
+.btn-light:hover { background: var(--gray-bg); color:rgb(125, 198, 77)}
 .btn-ghost { color: #fff; border: 1px solid rgba(255,255,255,0.4); }
 .btn-ghost:hover { background: rgba(255,255,255,0.1); }
-.btn-blue { background: var(--blue); color: #fff; margin-top: 28px; }
-.btn-blue:hover { background: var(--blue-hover); transform: scale(1.05); }
+.btn-blue { background: var(--green); color: #fff; margin-top: 28px; }
+.btn-blue:hover { background: var(--green-hover); transform: scale(1.05); }
 
 /* Hero */
 .hero {
@@ -163,7 +166,7 @@ ul { list-style: none; }
 h2 { font-size: 36px; font-weight: 600; letter-spacing: -0.02em; color: var(--black); }
 h2.light { color: #fff; }
 .subtitle { font-size: 15px; color: var(--gray-text); margin-top: 8px; }
-.link { color: var(--blue); font-size: 14px; font-weight: 500; }
+.link { color: var(--green); font-size: 14px; font-weight: 500; }
 .link:hover { text-decoration: underline; }
 
 /* Grids */
@@ -207,9 +210,9 @@ h2.light { color: #fff; }
     display: inline-block; padding: 6px 12px; border-radius: 999px;
     font-size: 12px; font-weight: 600;
 }
-.badge-blue { background: #eef5ff; color: var(--blue); }
+.badge-blue { background: #eef5ff; color: var(--green); }
 .badge-green { background: #eaf7ee; color: #138a36; }
-.badge-dark { background: rgba(0,113,227,0.1); color: var(--blue); }
+.badge-dark { background: rgba(0,113,227,0.1); color: var(--green); }
 
 /* Chips */
 .chips { display: flex; flex-wrap: wrap; gap: 12px; margin-top: 32px; }

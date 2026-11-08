@@ -1,6 +1,16 @@
 const $ = id => document.getElementById(id);
 let data;
 
+const nav = document.querySelector('.nav');
+
+function syncNavState() {
+    if (!nav) return;
+    nav.classList.toggle('is-scrolled', window.scrollY > 8);
+}
+
+window.addEventListener('scroll', syncNavState, { passive: true });
+syncNavState();
+
 async function init() {
     const r = await fetch('/api/me');
     // if (!r.ok) return (location.href = 'home.html');

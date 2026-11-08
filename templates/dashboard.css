@@ -8,6 +8,16 @@
 .chan-dot { width: 36px; height: 36px; border-radius: 50%; background: var(--blue); color: #fff;
   display: grid; place-items: center; font-size: 13px; font-weight: 600; }
 
+.logo{color: rgb(125, 198, 77);}
+.nav-links a { color: rgba(0, 0, 0, 0.88); font-size: 15px; transition: color .2s, font-size .25s ease; }
+.nav-links a:hover{color: rgba(0, 0, 0);}
+.nav.is-scrolled .logo {color: #fff;}
+.nav.is-scrolled .nav-links a {color: rgba(255, 255, 255, 0.88);}
+.nav.is-scrolled .nav-links a:hover {color: #fff;}
+.btn-small {background: rgb(133, 206, 84); }
+.btn-small:hover {background: rgb(125, 198, 77); }
+.nav-links a.btn {color: #fff;}
+
 .form { display: flex; flex-direction: column; gap: 18px; }
 .form label, .form legend { font-size: 13px; font-weight: 600; color: var(--gray-text); }
 .form input, .form textarea, .form select {
