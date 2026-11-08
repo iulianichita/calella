@@ -1,0 +1,26 @@
+{
+  "name": "calella",
+  "version": "1.0.0",
+  "description": "A web application created to solve a real problem for people that posts on social media: keeping track of events, dates, and content ideas. This project is part of the Buffer's Buffer Commit challenge.",
+  "main": "index.js",
+  "scripts": {
+    "start": "node index.js",
+    "dev": "node --watch index.js",
+    "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/iulianichita/calella.git"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "type": "commonjs",
+  "bugs": {
+    "url": "https://github.com/iulianichita/calella/issues"
+  },
+  "homepage": "https://github.com/iulianichita/calella#readme",
+  "dependencies": {
+    "express": "^5.3.0"
+  }
+}
