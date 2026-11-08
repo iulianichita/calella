@@ -1,0 +1,28 @@
+.dash { background: var(--gray-bg); }
+.dash-main { padding-top: 90px; padding-bottom: 80px; }
+.dash h1 { font-size: 34px; font-weight: 600; letter-spacing: -0.02em; }
+.dash h2 { font-size: 24px; margin: 48px 0 16px; }
+.stats { margin-top: 24px; }
+.stats h3 { font-size: 32px; }
+.chan { display: flex; align-items: center; gap: 12px; }
+.chan-dot { width: 36px; height: 36px; border-radius: 50%; background: var(--blue); color: #fff;
+  display: grid; place-items: center; font-size: 13px; font-weight: 600; }
+
+.form { display: flex; flex-direction: column; gap: 18px; }
+.form label, .form legend { font-size: 13px; font-weight: 600; color: var(--gray-text); }
+.form input, .form textarea, .form select {
+  display: block; width: 100%; margin-top: 6px; padding: 12px 14px; font: inherit; font-size: 15px;
+  color: var(--black); border: 1px solid var(--border); border-radius: 14px; background: #fff;
+}
+.form input:focus, .form textarea:focus, .form select:focus { outline: 2px solid var(--blue); border-color: transparent; }
+.form fieldset { border: none; }
+#channel-checks label { display: inline-flex; align-items: center; gap: 8px; margin: 8px 16px 0 0;
+  font-weight: 500; color: var(--black); }
+#channel-checks input { width: auto; margin: 0; }
+.form .btn { align-self: flex-start; margin-top: 0; border: none; cursor: pointer; }
+.form .btn:disabled { opacity: .5; cursor: wait; }
+
+#results { margin-top: 24px; }
+#results li { padding: 8px 0; border-bottom: 1px solid var(--border); font-size: 14px; }
+#results li:last-child { border-bottom: none; }
+.ok { color: #138a36; } .warn { color: var(--gray-text); }

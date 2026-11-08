@@ -1,0 +1,67 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>My Profile - calella</title>
+    <link rel="stylesheet" href="home.css">
+    <link rel="stylesheet" href="dashboard.css">
+</head>
+
+<body class="dash">
+
+    <header class="nav scrolled">
+        <div class="container nav-inner">
+        <a href="home.html" class="logo">calella</a>
+        <nav class="nav-links">
+            <a href="#channels">Channels</a>
+            <a href="#events">Events</a>
+            <a href="#new" class="btn btn-small">Start an event</a>
+            <a href="/auth/logout">Disconnect</a>
+        </nav>
+        </div>
+    </header>
+
+    <main class="container dash-main">
+        <h1 id="greeting">Welcome</h1>
+        <p class="subtitle" id="today"></p>
+
+        <div class="grid grid-3 stats">
+            <div class="card"><p class="label">Channels</p><h3 id="stat-channels">-</h3></div>
+            <div class="card"><p class="label">Events</p><h3 id="stat-events">-</h3></div>
+            <div class="card"><p class="label">Posts scheduled</p><h3 id="stat-posts">-</h3></div>
+        </div>
+
+        <h2 id="channels">Your Buffer channels</h2>
+        <div class="grid grid-3" id="channels-list"></div>
+
+        <h2 id="events">Your events</h2>
+        <div class="grid grid-3" id="events-list"></div>
+
+        <h2 id="new">Start an event</h2>
+        <form id="event-form" class="card form">
+            <label>Event name<input name="name" required placeholder="Admission contest 2027"></label>
+            <label>Short description<textarea name="description" rows="2" placeholder="One or two sentences used in the posts"></textarea></label>
+            <label>Template<select name="template" id="template"></select></label>
+
+            <div id="date-fields" class="grid grid-3"></div>
+
+            <fieldset>
+                <legend>Post on</legend>
+                <div id="channel-checks"></div>
+            </fieldset>
+
+            <label>Hashtags (comma separated)<input name="tags" placeholder="admission, university, 2027"></label>
+
+            <button type="submit" class="btn btn-blue" id="submit-btn">Create and schedule everything</button>
+        </form>
+
+        <div id="results" class="card" hidden></div>
+    </main>
+
+    <script src="dashboard.js"></script>
+    <script>
+        const nav = document.querySelector('.nav');
+    </script>
+</body>
+</html>

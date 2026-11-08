@@ -17,9 +17,8 @@
         <a href="home.html" class="logo">calella</a>
         <nav class="nav-links">
             <a href="#how">How it works</a>
-            <a href="#example">Example</a>
             <a href="#platforms">Platforms</a>
-            <a href="events.html" class="btn btn-small">Open App</a>
+            <a href="/auth/buffer" class="btn btn-small js-buffer-btn" data-connected="My Profile">Connect Buffer</a>
         </nav>
         </div>
     </header>
@@ -45,7 +44,7 @@
             </div>
 
             <div class="hero-actions">
-                <a href="events.html" class="btn btn-light">Start a Campaign</a>
+                <a href="/auth/buffer" class="btn btn-light js-buffer-btn" data-connected="Open Dashboard">Connect Buffer to start</a>
                 <a href="#how" class="btn btn-ghost">See how it works</a>
             </div>
         </div>
@@ -59,7 +58,7 @@
             <h2>How it works</h2>
             <p class="subtitle">From a list of dates to a full posting calendar, in three steps.</p>
             </div>
-            <a href="events.html" class="link">Connect with Buffer →</a>
+            <a href="events.html" class="link"  data-connected="Open Dashboard">Connect with Buffer →</a>
         </div>
 
         <div class="grid grid-3">
@@ -83,7 +82,7 @@
     </section>
 
     <!-- Example -->
-    <section id="example" class="section section-white">
+    <!-- <section id="example" class="section section-white">
         <div class="container">
         <div class="section-head">
             <div>
@@ -129,6 +128,34 @@
             </div>
         </div>
         </div>
+    </section> -->
+
+    <section id="why-buffer" class="section section-white">
+        <div class="container">
+            <div class="section-head">
+            <div>
+                <h2>Why we use Buffer</h2>
+                <p class="subtitle">One secure connection instead of one integration per social network.</p>
+            </div>
+            </div>
+            <div class="grid grid-3">
+                <article class="card">
+                    <p class="label">Security</p>
+                    <h3>Your password stays yours</h3>
+                    <p class="card-text">You sign in on Buffer's own page and approve only what we need. We never see your password, and you can revoke access at any time from your Buffer settings.</p>
+                </article>
+                <article class="card">
+                    <p class="label">Reliability</p>
+                    <h3>Posts go out on time</h3>
+                    <p class="card-text">Scheduled posts live in Buffer and are delivered by Buffer, so they publish even when our app is offline.</p>
+                </article>
+                <article class="card">
+                    <p class="label">Reach</p>
+                    <h3>All your channels, one link</h3>
+                    <p class="card-text">Connect your channels once in Buffer and we can schedule to LinkedIn, Instagram, Pinterest and more, without connecting each network separately.</p>
+                </article>
+            </div>
+        </div>
     </section>
 
     <!-- Platforms -->
@@ -143,14 +170,14 @@
 
         <div class="grid grid-2">
             <article class="card card-dark">
-            <span class="badge badge-dark">Formats</span>
-            <h3>Sized for each network</h3>
-            <p class="card-text">Square, portrait, story and landscape versions generated from the same content.</p>
+                <span class="badge badge-dark">Formats</span>
+                <h3>Sized for each network</h3>
+                <p class="card-text">Square, portrait, story and landscape versions generated from the same content.</p>
             </article>
             <article class="card card-dark">
-            <span class="badge badge-dark">Captions</span>
-            <h3>Tone that fits</h3>
-            <p class="card-text">Short and punchy for X, professional for LinkedIn, friendly for Instagram and Facebook.</p>
+                <span class="badge badge-dark">Captions</span>
+                <h3>Tone that fits</h3>
+                <p class="card-text">Short and punchy for X, professional for LinkedIn, friendly for Instagram and Facebook.</p>
             </article>
         </div>
 
@@ -169,7 +196,7 @@
         <div class="container">
         <h2>Ready to plan your next campaign?</h2>
         <p class="subtitle">Set your dates once and let <i>calella</i> handle the rest.</p>
-        <a href="events.html" class="btn btn-blue">Get Started</a>
+        <a href="events.html" class="btn btn-blue" data-connected="Open Dashboard">Get Started</a>
         </div>
     </section>
 
@@ -179,6 +206,7 @@
         </div>
     </footer>
 
+    
     <script>
         const nav = document.querySelector('.nav');
 
@@ -188,6 +216,14 @@
 
         window.addEventListener('scroll', syncNavState, { passive: true });
         syncNavState();
+
+        fetch('/api/buffer/status').then(r => r.json()).then(({ connected }) => {
+            if (!connected) return;
+            document.querySelectorAll('.js-buffer-btn').forEach(b => {
+            b.href = 'dashboard.html';
+            b.textContent = b.dataset.connected;
+            });
+        });
     </script>
 
 </body>
