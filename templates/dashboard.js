@@ -13,7 +13,7 @@ syncNavState();
 
 async function init() {
     const r = await fetch('/api/me');
-    // if (!r.ok) return (location.href = 'home.html');
+    if (!r.ok) return (location.href = '/home');
     data = await r.json();
 
     const name = data.email.split('@')[0];
@@ -40,7 +40,7 @@ async function init() {
     $('template').innerHTML = Object.entries(data.templates)
         .map(([k, t]) => `<option value="${k}">${t.name}</option>`).join('');
     renderDates();
-    }
+
     $('poster-picker').innerHTML =
         `<label class="poster-opt"><input type="radio" name="poster" value=""><div class="poster-none">None</div><span>Text only</span></label>` +
         Object.entries(data.posters).map(([k, p], i) => `
@@ -49,6 +49,9 @@ async function init() {
                 <img src="${p.url}" alt="${p.name}"><span>${p.name}</span>
             </label>`).join('');
     updatePreview();
+
+    $('poster-picker').addEventListener('change', updatePreview);
+    $('event-form').elements['name'].addEventListener('input', updatePreview);
 
     function renderDates() {
     const fields = data.templates[$('template').value].fields;
@@ -92,6 +95,7 @@ async function init() {
     $('submit-btn').textContent = 'Create and schedule everything';
     if (r.ok) init();
 });
+}
 
 let previewTimer;
 function updatePreview() {
@@ -110,7 +114,4 @@ function updatePreview() {
         box.hidden = false;
     }, 300);
 }
-$('poster-picker').addEventListener('change', updatePreview);
-$('event-form').elements['name'].addEventListener('input', updatePreview);
-
 init();
