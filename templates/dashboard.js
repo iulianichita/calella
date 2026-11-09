@@ -41,6 +41,14 @@ async function init() {
         .map(([k, t]) => `<option value="${k}">${t.name}</option>`).join('');
     renderDates();
     }
+    $('poster-picker').innerHTML =
+        `<label class="poster-opt"><input type="radio" name="poster" value=""><div class="poster-none">None</div><span>Text only</span></label>` +
+        Object.entries(data.posters).map(([k, p], i) => `
+            <label class="poster-opt">
+                <input type="radio" name="poster" value="${k}" ${i === 0 ? 'checked' : ''}>
+                <img src="${p.url}" alt="${p.name}"><span>${p.name}</span>
+            </label>`).join('');
+    updatePreview();
 
     function renderDates() {
     const fields = data.templates[$('template').value].fields;
@@ -67,7 +75,8 @@ async function init() {
         template: f.template.value,
         dates,
         channelIds: [...document.querySelectorAll('#channel-checks input:checked')].map(i => i.value),
-        tags: f.tags.value.split(',').map(t => t.trim()).filter(Boolean)
+        tags: f.tags.value.split(',').map(t => t.trim()).filter(Boolean),
+        poster: f.querySelector('input[name="poster"]:checked')?.value || '',
         })
     });
     const out = await r.json();
@@ -77,11 +86,31 @@ async function init() {
     box.innerHTML = `<h3>${r.ok ? 'Done' : 'Something went wrong: ' + out.error}</h3><ul>` +
         (out.results || []).map(x => `<li><b>${x.title}</b>${x.channel ? ' · ' + x.channel : ''}
         ${x.dueAt ? ' · ' + new Date(x.dueAt).toLocaleDateString('en-GB') : ''}
-        · <span class="${x.status === 'scheduled' ? 'ok' : 'warn'}">${x.status}</span></li>`).join('') + '</ul>';
+        · <span class="${x.status === 'scheduled' ? 'ok' : 'warn'}">${x.status}</span>${x.image ? `<br><a href="${x.image}" target="_blank"><img class="res-img" src="${x.image}" alt=""></a>` : ''}</li>`).join('') + '</ul>';
 
     $('submit-btn').disabled = false;
     $('submit-btn').textContent = 'Create and schedule everything';
     if (r.ok) init();
 });
+
+let previewTimer;
+function updatePreview() {
+    clearTimeout(previewTimer);
+    previewTimer = setTimeout(() => {
+        const poster = document.querySelector('input[name="poster"]:checked')?.value;
+        const box = $('poster-preview');
+        if (!poster) { box.hidden = true; return; }
+        const q = new URLSearchParams({
+            bg: poster,
+            eyebrow: $('event-form').elements['name'].value || 'Event name',
+            headline: 'Registrations open',
+            line: '12 March'
+        });
+        box.src = `/api/poster.png?${q}`;
+        box.hidden = false;
+    }, 300);
+}
+$('poster-picker').addEventListener('change', updatePreview);
+$('event-form').elements['name'].addEventListener('input', updatePreview);
 
 init();

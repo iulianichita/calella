@@ -3,6 +3,9 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Cedarville+Cursive&display=swap" rel="stylesheet">
     <title>My Profile - calella</title>
     <link rel="stylesheet" href="home.css">
     <link rel="stylesheet" href="dashboard.css">
@@ -43,6 +46,11 @@
             <label>Event name<input name="name" required placeholder="Admission contest 2027"></label>
             <label>Short description<textarea name="description" rows="2" placeholder="One or two sentences used in the posts"></textarea></label>
             <label>Template<select name="template" id="template"></select></label>
+            <fieldset>
+                <legend>Poster design</legend>
+                <div id="poster-picker" class="poster-picker"></div>
+                <img id="poster-preview" class="poster-preview" alt="Poster preview" hidden>
+            </fieldset>
 
             <div id="date-fields" class="grid grid-3"></div>
 

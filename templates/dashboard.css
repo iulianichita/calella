@@ -8,7 +8,16 @@
 .chan-dot { width: 36px; height: 36px; border-radius: 50%; background: var(--blue); color: #fff;
   display: grid; place-items: center; font-size: 13px; font-weight: 600; }
 
-.logo{color: rgb(125, 198, 77);}
+.logo{
+  color: rgb(125, 198, 77);
+  font-family: 'Cedarville Cursive', cursive;
+  font-weight: 300;
+  font-size: 28px;
+  letter-spacing: 0.02em;
+  line-height: 1;
+  text-transform: lowercase;
+  transition: font-size .25s ease;
+}
 .nav-links a { color: rgba(0, 0, 0, 0.88); font-size: 15px; transition: color .2s, font-size .25s ease; }
 .nav-links a:hover{color: rgba(0, 0, 0);}
 .nav.is-scrolled .logo {color: #fff;}
@@ -17,6 +26,16 @@
 .btn-small {background: rgb(133, 206, 84); }
 .btn-small:hover {background: rgb(125, 198, 77); }
 .nav-links a.btn {color: #fff;}
+
+.poster-picker { display: flex; flex-wrap: wrap; gap: 14px; margin-top: 8px; }
+.poster-opt { position: relative; display: flex; flex-direction: column; align-items: center; gap: 6px; width: 110px; cursor: pointer; font-size: 12px; }
+.form .poster-opt input { position: absolute; opacity: 0; width: auto; padding: 0; margin: 0; }
+.poster-opt img, .poster-none { width: 100%; aspect-ratio: 2 / 3; object-fit: cover; border-radius: 12px; border: 2px solid var(--border); }
+.poster-none { display: grid; place-items: center; color: var(--gray-text); background: #fff; }
+.poster-opt input:checked + img, .poster-opt input:checked + .poster-none { border-color: var(--blue); }
+.poster-opt span { color: var(--gray-text); font-weight: 500; }
+.poster-preview { width: 260px; max-width: 100%; margin-top: 16px; border-radius: 14px; border: 1px solid var(--border); }
+.res-img { width: 90px; border-radius: 8px; margin-top: 6px; }
 
 .form { display: flex; flex-direction: column; gap: 18px; }
 .form label, .form legend { font-size: 13px; font-weight: 600; color: var(--gray-text); }

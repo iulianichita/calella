@@ -5,6 +5,12 @@ const crypto = require('crypto');
 const session = require('express-session');
 const eventTemplates = require('./eventTemplates');
 
+// posters
+const { createCanvas, loadImage, GlobalFonts } = require('@napi-rs/canvas');
+const posterTemplates = require('./posterTemplates');
+
+try { GlobalFonts.registerFromPath(path.join(__dirname, 'fonts', 'Poster.ttf'), 'Poster'); } catch (e) {}
+
 const app = express();
 const PORT = process.env.PORT || 3000;
 
@@ -117,7 +123,9 @@ app.get('/api/me', async (req, res) => {
             channels,
             events: req.session.events || [],
             templates: Object.fromEntries(Object.entries(eventTemplates)
-                .map(([k, t]) => [k, { name: t.name, fields: t.fields }]))
+                .map(([k, t]) => [k, { name: t.name, fields: t.fields }])),
+            posters: Object.fromEntries(Object.entries(posterTemplates)
+                .map(([k, p]) => [k, { name: p.name, url: p.url }])),
         });
     } catch (e) { res.status(e.status || 500).json({ error: e.message }); }
 });
@@ -133,13 +141,15 @@ const adapt = (service, text, tags) => {
 };
 
 app.post('/api/events', async (req, res) => {
-    const { name, description = '', template, dates, channelIds = [], tags = [] } = req.body;
+    const { name, description = '', template, dates, channelIds = [], tags = [], poster = '' } = req.body;
     
     const t = eventTemplates[template];
     const chans = (req.session.channels || []).filter(c => channelIds.includes(c.id));
     if (!t || !chans.length) return res.status(400).json({ error: 'Pick a template and a channel' });
 
     const results = [];
+    const base = `${req.protocol}://${req.get('host')}`;
+    const fmtDate = d => new Date(d).toLocaleDateString('en-GB', { day: 'numeric', month: 'long' });
 
     try {
         for (const p of t.posts) {
@@ -152,20 +162,114 @@ app.post('/api/events', async (req, res) => {
 
             for (const ch of chans) {
                 const text = adapt(ch.service, p.text({ name, description, dates }), tags);
+                const imageUrl = poster ? `${base}/api/poster.png?${new URLSearchParams({
+                    bg: poster,
+                    eyebrow: name,
+                    headline: p.title,
+                    line: p.days <= 0 ? fmtDate(dates[p.at]) : ''
+                })}` : null;
+
                 const data = await buffer(req, `mutation { createPost(input: {
                     text: ${JSON.stringify(text)}, channelId: ${JSON.stringify(ch.id)},
                     schedulingType: automatic, mode: customScheduled, dueAt: ${JSON.stringify(due.toISOString())}
+                    ${imageUrl ? `, assets: [{ image: { url: ${JSON.stringify(imageUrl)} } }]` : ''}
                     }) { ... on PostActionSuccess { post { id dueAt } } ... on MutationError { message } } }`);
-                
+
                 const r = data.createPost;
 
-                results.push({ title: p.title, channel: ch.name, dueAt: due, status: r.post ? 'scheduled' : r.message });
+                results.push({ title: p.title, channel: ch.name, dueAt: due, image: imageUrl, status: r.post ? 'scheduled' : r.message });
             }
         }
 
         req.session.events = [...(req.session.events || []), { name, template: t.name, posts: results.length }];
         res.json({ results });
     } catch (e) { res.status(e.status || 500).json({ error: e.message, results }); }
+});
+
+// poster generator
+const bgCache = new Map();
+async function getBg(key) {
+    if (!bgCache.has(key)) {
+        const r = await fetch(posterTemplates[key].url);
+        if (!r.ok) throw new Error('Cannot load template image');
+        bgCache.set(key, await loadImage(Buffer.from(await r.arrayBuffer())));
+    }
+    return bgCache.get(key);
+}
+
+function wrap(ctx, text, maxW) {
+    const lines = []; let line = '';
+    for (const w of text.split(/\s+/)) {
+        const test = line ? `${line} ${w}` : w;
+        if (ctx.measureText(test).width > maxW && line) { lines.push(line); line = w; }
+        else line = test;
+    }
+    if (line) lines.push(line);
+    return lines;
+}
+
+async function renderPoster({ bg, eyebrow, headline, line, debug }) {
+    const tpl = posterTemplates[bg];
+    const img = await getBg(bg);
+    const canvas = createCanvas(img.width, img.height);
+    const ctx = canvas.getContext('2d');
+    ctx.drawImage(img, 0, 0);
+
+    const z = {
+        x: tpl.zone.x * img.width, y: tpl.zone.y * img.height,
+        w: tpl.zone.w * img.width, h: tpl.zone.h * img.height
+    };
+    if (debug) { ctx.strokeStyle = 'red'; ctx.lineWidth = 4; ctx.strokeRect(z.x, z.y, z.w, z.h); }
+
+    ctx.fillStyle = tpl.color;
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'top';
+    const family = 'Poster, sans-serif';
+
+    const blocks = [
+        { text: eyebrow && eyebrow.toUpperCase(), k: 0.45 },
+        { text: headline, k: 1.4 },
+        { text: line, k: 0.7 }
+    ].filter(b => b.text);
+
+    // micsoreaza fontul
+    let S = img.width * 0.07, layout = [], h = 0;
+    for (; S >= 14; S -= 2) {
+        layout = []; h = 0;
+        for (const b of blocks) {
+            const size = S * b.k;
+            ctx.font = `${size}px ${family}`;
+            const lines = wrap(ctx, b.text, z.w);
+            const lh = size * 1.2;
+            layout.push({ lines, size, lh });
+            h += lines.length * lh + size * 0.5;
+        }
+        if (h <= z.h) break;
+    }
+
+    let y = z.y + (z.h - h) / 2;
+    for (const l of layout) {
+        ctx.font = `${l.size}px ${family}`;
+        for (const t of l.lines) { ctx.fillText(t, z.x + z.w / 2, y); y += l.lh; }
+        y += l.size * 0.5;
+    }
+    return canvas.toBuffer('image/png');
+}
+
+// buffer descarca imaginea de aici
+app.get('/api/poster.png', async (req, res) => {
+    try {
+        const { bg, eyebrow = '', headline = '', line = '', debug } = req.query;
+        if (!posterTemplates[bg]) return res.status(400).send('Unknown design');
+        const png = await renderPoster({
+            bg,
+            eyebrow: eyebrow.slice(0, 80),
+            headline: headline.slice(0, 80),
+            line: line.slice(0, 120),
+            debug: !!debug
+        });
+        res.type('png').set('Cache-Control', 'public, max-age=3600').send(png);
+    } catch (e) { res.status(500).send(e.message); }
 });
 
 

@@ -42,14 +42,13 @@ ul { list-style: none; }
     transition: height .25s ease;
 }
 .logo {
-    font-family: 'Cormorant Garamond', serif;
+    font-family: 'Cedarville Cursive', cursive;
     color: #fff;
     font-weight: 300;
     font-size: 28px;
     letter-spacing: 0.02em;
     line-height: 1;
     text-transform: lowercase;
-    font-feature-settings: "liga" 1, "dlig" 1, "swsh" 1;
     transition: font-size .25s ease;
 }
 .nav-links { display: flex; align-items: center; gap: 28px; }
