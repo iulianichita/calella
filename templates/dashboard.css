@@ -23,8 +23,10 @@
 .nav.is-scrolled .logo {color: #fff;}
 .nav.is-scrolled .nav-links a {color: rgba(255, 255, 255, 0.88);}
 .nav.is-scrolled .nav-links a:hover {color: #fff;}
-.btn-small {background: rgb(133, 206, 84); }
-.btn-small:hover {background: rgb(125, 198, 77); }
+.btn.btn-small {background: rgb(133, 206, 84); color: #fff; 
+    transition: background .2s ease, color .2s ease;}
+.btn.btn-small:hover {background: rgb(125, 198, 77); color: #fff}
+.nav-links a.btn.btn-small:hover { color: #fff; }
 .nav-links a.btn {color: #fff;}
 
 .poster-picker { display: flex; flex-wrap: wrap; gap: 14px; margin-top: 8px; }
