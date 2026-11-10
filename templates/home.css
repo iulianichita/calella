@@ -5,8 +5,10 @@
     --border: #d2d2d7;
     --blue: #0071e3;
     --blue-hover: #0077ed;
-    --green: rgb(133, 206, 84);
-    --green-hover: rgb(125, 198, 77);
+    --green: #A2C747;
+    --green-hover: #8EB338;
+    /* --green: rgb(133, 206, 84); */
+    /* --green-hover: rgb(125, 198, 77); */
     --dark-card: #2a2a2f;
     --dark-border: #424245;
 }
@@ -89,8 +91,8 @@ ul { list-style: none; }
 .btn-light:hover { background: var(--gray-bg); color:rgb(125, 198, 77)}
 .btn-ghost { color: #fff; border: 1px solid rgba(255,255,255,0.4); }
 .btn-ghost:hover { background: rgba(255,255,255,0.1); }
-.btn-blue { background: var(--green); color: #fff; margin-top: 28px; }
-.btn-blue:hover { background: var(--green-hover); transform: scale(1.05); }
+.btn-green { background: var(--green); color: #fff; margin-top: 28px; }
+.btn-green:hover { background: var(--green-hover); transform: scale(1.03); }
 
 /* Hero */
 .hero {
@@ -183,13 +185,13 @@ h2.light { color: #fff; }
     box-shadow: 0 1px 2px rgba(0,0,0,0.05);
     transition: all .3s;
 }
-.card:hover { box-shadow: 0 6px 20px rgba(0,0,0,0.08); border-color: rgba(25, 44, 63, 0.3); }
+.card:hover { box-shadow: 0 6px 20px rgba(0,0,0,0.08); border-color: rgba(39, 63, 25, 0.3); }
 .label { font-size: 11px; text-transform: uppercase; letter-spacing: 0.1em; color: var(--gray-text); font-weight: 600; }
 .card h3 { font-size: 20px; font-weight: 600; margin-top: 8px; }
 .card-text { font-size: 14px; color: var(--gray-text); line-height: 1.6; margin-top: 10px; }
 
 .card-dark { background: var(--dark-card); border-color: var(--dark-border); padding: 32px; }
-.card-dark:hover { border-color: #425467; box-shadow: 0 10px 40px rgba(0,113,227,0.05); }
+.card-dark:hover { border-color: #4e6742; box-shadow: 0 10px 20px rgba(39, 63, 25, 0.3); }
 .card-dark h3 { color: #fff; margin-top: 16px; }
 .card-dark .card-text { color: #a1a1a6; }
 
@@ -211,7 +213,7 @@ h2.light { color: #fff; }
 }
 .badge-blue { background: #eef5ff; color: var(--green); }
 .badge-green { background: #eaf7ee; color: #138a36; }
-.badge-dark { background: rgba(0,113,227,0.1); color: var(--green); }
+.badge-dark { background: rgba(72, 117, 29, 0.1); color: var(--green); }
 
 /* Chips */
 .chips { display: flex; flex-wrap: wrap; gap: 12px; margin-top: 32px; }
