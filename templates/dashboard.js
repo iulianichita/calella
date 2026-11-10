@@ -197,7 +197,7 @@ async function init() {
                 <label>Event day
                     <input type="date" name="date_eventDay" required>
                 </label>
-                <br>
+                <br class="hidd">
 
                 <div class="conditional-row">
                     <label class="checkbox-label">

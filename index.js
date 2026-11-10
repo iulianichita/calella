@@ -36,6 +36,7 @@ app.use(express.static(path.join(__dirname, 'templates')));
 app.get('/', (req, res) => res.sendFile(path.join(__dirname, 'templates/home.html')));
 app.get('/home', (req, res) => res.sendFile(path.join(__dirname, 'templates/home.html')));
 app.get('/profile', (req, res) => res.sendFile(path.join(__dirname, 'templates/dashboard.html')));
+app.get('/learn', (req, res) => res.sendFile(path.join(__dirname, 'templates/learn.html')));
 
 
 // Buffer OAuth
@@ -274,7 +275,7 @@ app.post('/api/events', async (req, res) => {
                                 ${ch.service === 'instagram' ? ', metadata: { instagram: { type: post, shouldShareToFeed: true } }' : ''}
                                 ${imageUrl ? `, assets: [{ image: { url: ${JSON.stringify(imageUrl)} } }]` : ''}
                             }
-                        ) { 
+                        ) {
                             ... on PostActionSuccess { 
                                 post { id dueAt } 
                             } 

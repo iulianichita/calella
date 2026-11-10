@@ -193,6 +193,12 @@ input[type="checkbox"]:checked::before {
     line-height: 1.4;
 }
 
+@media (max-width: 768px) {
+    .hidd {
+        display: none !important;
+    }
+}
+
 @keyframes fadeInSlide {
     from {
         opacity: 0;
