@@ -65,8 +65,8 @@ app.get('/auth/buffer', (req, res) => {
 
 
 app.get('/auth/buffer/callback', async (req, res) => {
-    console.log('cookie primit:', !!req.headers.cookie, 'attempts:', req.session.oauthAttempts?.length, 'state primit:', state);
     const { code, state, error } = req.query;
+    console.log('cookie primit:', !!req.headers.cookie, 'attempts:', req.session.oauthAttempts?.length, 'state primit:', state);
     if (error) return res.redirect('/home');
 
     const attempts = Array.isArray(req.session.oauthAttempts) ? req.session.oauthAttempts : [];
