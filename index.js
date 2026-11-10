@@ -119,11 +119,12 @@ app.get('/api/me', async (req, res) => {
         req.session.channels = channels;
 
         res.json({
+            name: account.name,
             email: account.email,
             channels,
             events: req.session.events || [],
             templates: Object.fromEntries(Object.entries(eventTemplates)
-                .map(([k, t]) => [k, { name: t.name, fields: t.fields }])),
+                .map(([k, t]) => [k, { name: t.name, fields: t.fields, kind: t.kind || 'legacy' }])),
             posters: Object.fromEntries(Object.entries(posterTemplates)
                 .map(([k, p]) => [k, { name: p.name, url: p.url }])),
         });
@@ -141,7 +142,16 @@ const adapt = (service, text, tags) => {
 };
 
 app.post('/api/events', async (req, res) => {
-    const { name, description = '', template, dates, channelIds = [], tags = [], poster = '' } = req.body;
+    const {
+        name,
+        description = '',
+        template,
+        dates = {},
+        options = {},
+        channelIds = [],
+        tags = [],
+        poster = ''
+    } = req.body;
     
     const t = eventTemplates[template];
     const chans = (req.session.channels || []).filter(c => channelIds.includes(c.id));
@@ -152,9 +162,19 @@ app.post('/api/events', async (req, res) => {
     const fmtDate = d => new Date(d).toLocaleDateString('en-GB', { day: 'numeric', month: 'long' });
 
     try {
-        for (const p of t.posts) {
-            const due = new Date(`${dates[p.at]}T10:00:00.000Z`);
-            due.setUTCDate(due.getUTCDate() + p.days);
+        const templatePosts = typeof t.buildPosts === 'function'
+            ? t.buildPosts({ name, description, dates, options })
+            : t.posts;
+
+        for (const p of templatePosts) {
+            const due = p.dueDate
+                ? new Date(`${p.dueDate}T10:00:00.000Z`)
+                : new Date(`${dates[p.at]}T10:00:00.000Z`);
+
+            if (!p.dueDate) {
+                due.setUTCDate(due.getUTCDate() + p.days);
+            }
+
             if (isNaN(due) || due < new Date()) {
                 results.push({ title: p.title, status: 'skipped (date passed)' });
                 continue;
@@ -166,7 +186,7 @@ app.post('/api/events', async (req, res) => {
                     bg: poster,
                     eyebrow: name,
                     headline: p.title,
-                    line: p.days <= 0 ? fmtDate(dates[p.at]) : ''
+                    line: p.lineDate ? fmtDate(p.lineDate) : (p.days <= 0 ? fmtDate(dates[p.at]) : '')
                 })}` : null;
 
                 const data = await buffer(req, `mutation { createPost(input: {
