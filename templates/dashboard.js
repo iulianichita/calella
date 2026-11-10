@@ -16,8 +16,8 @@ async function init() {
     // if (!r.ok) return (location.href = '/home');
     data = await r.json();
 
-    // const name = data.email.split('@')[0];
-    const name = data.name;
+    const name = data.email.split('@')[0];
+    // const name = data.name;
     $('greeting').textContent = `Hello, ${name}!`;
     $('today').textContent = new Date().toLocaleDateString('en-GB', { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric' });
 
@@ -87,6 +87,7 @@ async function init() {
             <label>Stage day
                 <input type="date" name="stage_date_${index}" required>
             </label>
+            <br>
             <button type="button" class="btn btn-small stage-remove">Remove</button>
         `;
         container.appendChild(row);
@@ -224,32 +225,47 @@ async function init() {
         $('submit-btn').disabled = true;
         $('submit-btn').textContent = 'Scheduling...';
 
-        const r = await fetch('/api/events', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({
-                name: f.name.value,
-                description: f.description.value,
-                template: f.template.value,
-                dates: payload.dates,
-                options: payload.options,
-                channelIds: [...document.querySelectorAll('#channel-checks input:checked')].map(i => i.value),
-                tags: f.tags.value.split(',').map(t => t.trim()).filter(Boolean),
-                poster: f.querySelector('input[name="poster"]:checked')?.value || '',
-            })
-        });
-        const out = await r.json();
+        try {
+            const r = await fetch('/api/events', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    name: f.name.value,
+                    description: f.description.value,
+                    template: f.template.value,
+                    dates: payload.dates,
+                    options: payload.options,
+                    channelIds: [...document.querySelectorAll('#channel-checks input:checked')].map(i => i.value),
+                    tags: f.tags.value.split(',').map(t => t.trim()).filter(Boolean),
+                    poster: f.querySelector('input[name="poster"]:checked')?.value || '',
+                })
+            });
 
-        const box = $('results');
-        box.hidden = false;
-        box.innerHTML = `<h3>${r.ok ? 'Done' : 'Something went wrong: ' + out.error}</h3><ul>` +
-            (out.results || []).map(x => `<li><b>${x.title}</b>${x.channel ? ' · ' + x.channel : ''}
-            ${x.dueAt ? ' · ' + new Date(x.dueAt).toLocaleDateString('en-GB') : ''}
-            · <span class="${x.status === 'scheduled' ? 'ok' : 'warn'}">${x.status}</span>${x.image ? `<br><a href="${x.image}" target="_blank"><img class="res-img" src="${x.image}" alt=""></a>` : ''}</li>`).join('') + '</ul>';
+            let out;
+            const contentType = r.headers.get('content-type') || '';
+            if (contentType.includes('application/json')) {
+                out = await r.json();
+            } else {
+                const text = await r.text();
+                out = { error: text || 'Unexpected server response', results: [] };
+            }
 
-        $('submit-btn').disabled = false;
-        $('submit-btn').textContent = 'Create and schedule everything';
-        if (r.ok) init();
+            const box = $('results');
+            box.hidden = false;
+            box.innerHTML = `<h3>${r.ok ? 'Done' : 'Something went wrong: ' + out.error}</h3><ul>` +
+                (out.results || []).map(x => `<li><b>${x.title}</b>${x.channel ? ' · ' + x.channel : ''}
+                ${x.dueAt ? ' · ' + new Date(x.dueAt).toLocaleDateString('en-GB') : ''}
+                · <span class="${x.status === 'scheduled' ? 'ok' : 'warn'}">${x.status}</span>${x.image ? `<br><a href="${x.image}" target="_blank"><img class="res-img" src="${x.image}" alt=""></a>` : ''}</li>`).join('') + '</ul>';
+
+            if (r.ok) init();
+        } catch (err) {
+            const box = $('results');
+            box.hidden = false;
+            box.innerHTML = `<h3>Something went wrong: ${err.message || 'Network error'}</h3>`;
+        } finally {
+            $('submit-btn').disabled = false;
+            $('submit-btn').textContent = 'Create and schedule everything';
+        }
     });
 }
 

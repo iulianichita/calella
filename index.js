@@ -4,6 +4,8 @@ const path = require("path");
 const crypto = require('crypto');
 const session = require('express-session');
 const eventTemplates = require('./eventTemplates');
+const fs = require('fs');
+const https = require('https');
 
 // posters
 const { createCanvas, loadImage, GlobalFonts } = require('@napi-rs/canvas');
@@ -66,7 +68,7 @@ app.get('/auth/buffer', (req, res) => {
 
 app.get('/auth/buffer/callback', async (req, res) => {
     const { code, state, error } = req.query;
-    console.log('cookie primit:', !!req.headers.cookie, 'attempts:', req.session.oauthAttempts?.length, 'state primit:', state);
+    // console.log('cookie primit:', !!req.headers.cookie, 'attempts:', req.session.oauthAttempts?.length, 'state primit:', state);
     if (error) return res.redirect('/home');
 
     const attempts = Array.isArray(req.session.oauthAttempts) ? req.session.oauthAttempts : [];
@@ -114,11 +116,20 @@ async function buffer(req, query) {
     if (!b || Date.now() > b.expiresAt) {
         throw Object.assign(new Error('Not connected'), { status: 401 });
     }
-    const r = await fetch('https://api.buffer.com', {
-        method: 'POST',
-        headers: { Authorization: `Bearer ${b.accessToken}`, 'Content-Type': 'application/json' },
-        body: JSON.stringify({ query })
-    });
+    let r;
+    try {
+        r = await fetch('https://api.buffer.com', {
+            method: 'POST',
+            headers: { Authorization: `Bearer ${b.accessToken}`, 'Content-Type': 'application/json' },
+            body: JSON.stringify({ query }),
+            signal: AbortSignal.timeout(25000)
+        });
+    } catch (e) {
+        if (e.name === 'TimeoutError') {
+            throw new Error('Buffer API timeout after 25 seconds');
+        }
+        throw e;
+    }
     if (r.status === 401) throw Object.assign(new Error('Not connected'), { status: 401 });
     const json = await r.json();
     if (json.errors) throw new Error(json.errors[0].message);
@@ -134,7 +145,7 @@ app.get('/api/me', async (req, res) => {
         req.session.channels = channels;
 
         res.json({
-            name: account.name,
+            // name: account.name,
             email: account.email,
             channels,
             events: req.session.events || [],
@@ -173,8 +184,15 @@ app.post('/api/events', async (req, res) => {
     if (!t || !chans.length) return res.status(400).json({ error: 'Pick a template and a channel' });
 
     const results = [];
-    const base = `${req.protocol}://${req.get('host')}`;
+    const base = process.env.PUBLIC_BASE_URL || `${req.protocol}://${req.get('host')}`;
     const fmtDate = d => new Date(d).toLocaleDateString('en-GB', { day: 'numeric', month: 'long' });
+    const hasInstagram = chans.some(ch => ch.service === 'instagram');
+
+    if (poster && hasInstagram && /localhost|127\.0\.0\.1/i.test(base)) {
+        return res.status(400).json({
+            error: 'Instagram posts with images require a public image URL. Set PUBLIC_BASE_URL to a public HTTPS domain (for example via a tunnel).'
+        });
+    }
 
     try {
         const templatePosts = typeof t.buildPosts === 'function'
@@ -203,12 +221,30 @@ app.post('/api/events', async (req, res) => {
                     headline: p.title,
                     line: p.lineDate ? fmtDate(p.lineDate) : (p.days <= 0 ? fmtDate(dates[p.at]) : '')
                 })}` : null;
+                const metadata = ch.service === 'instagram'
+                    ? ', metadata: { instagram: { type: post, shouldShareToFeed: true } }'
+                    : '';
+                console.log(imageUrl);
 
-                const data = await buffer(req, `mutation { createPost(input: {
-                    text: ${JSON.stringify(text)}, channelId: ${JSON.stringify(ch.id)},
-                    schedulingType: automatic, mode: customScheduled, dueAt: ${JSON.stringify(due.toISOString())}
-                    ${imageUrl ? `, assets: [{ image: { url: ${JSON.stringify(imageUrl)} } }]` : ''}
-                    }) { ... on PostActionSuccess { post { id dueAt } } ... on MutationError { message } } }`);
+                const data = await buffer(req, 
+                    `mutation 
+                    { createPost(
+                        input: {
+                            text: ${JSON.stringify(text)}, 
+                            channelId: ${JSON.stringify(ch.id)},
+                            schedulingType: automatic, 
+                            mode: customScheduled, 
+                            dueAt: ${JSON.stringify(due.toISOString())}
+                            ${metadata}
+                            ${imageUrl ? `, 
+                            assets: [{ image: { url: ${JSON.stringify(imageUrl)} } }]` : ''}
+                        }) 
+                            { ... on PostActionSuccess { 
+                                post { id dueAt } 
+                                } 
+                            ... on MutationError { message } 
+                            } 
+                    }`);
 
                 const r = data.createPost;
 
@@ -308,6 +344,11 @@ app.get('/api/poster.png', async (req, res) => {
 });
 
 
-app.listen(PORT, () => {
-    console.log(`Server is running on port ${PORT}`);
-});
+if (process.env.LOCAL_HTTPS === '1') {
+    https.createServer({
+        key: fs.readFileSync('localhost-key.pem'),
+        cert: fs.readFileSync('localhost.pem')
+    }, app).listen(PORT, () => console.log(`HTTPS local pe https://localhost:${PORT}`));
+} else {
+    app.listen(PORT, () => console.log(`Server is running on port ${PORT}`));
+}
