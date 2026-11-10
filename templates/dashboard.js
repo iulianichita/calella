@@ -13,7 +13,7 @@ syncNavState();
 
 async function init() {
     const r = await fetch('/api/me');
-    if (!r.ok) return (location.href = '/home');
+    // if (!r.ok) return (location.href = '/home');
     data = await r.json();
 
     const name = data.email.split('@')[0];
