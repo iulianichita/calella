@@ -143,7 +143,7 @@ async function init() {
     updatePreview();
 
     $('poster-picker').addEventListener('change', updatePreview);
-    $('event-form').elements['name'].addEventListener('input', updatePreview);
+    $('event-form').elements['name', 'description'].addEventListener('input', updatePreview);
     $('template-fields').addEventListener('input', updatePreview);
     $('template-fields').addEventListener('change', updatePreview);
 
@@ -448,11 +448,13 @@ function updatePreview() {
             headline = document.querySelector('input[name^="stage_name_"]')?.value || 'Stage 1';
             line = document.querySelector('input[name^="stage_date_"]')?.value || '';
         }
+        const description = $('event-form').elements['description']?.value || '';
 
         const q = new URLSearchParams({
             bg: poster,
             eyebrow: $('event-form').elements['name'].value || 'Event name',
             headline,
+            description,
             line
         });
         box.src = `/api/poster.png?${q}`;

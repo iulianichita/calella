@@ -259,6 +259,7 @@ app.post('/api/events', async (req, res) => {
                     bg: poster,
                     eyebrow: name,
                     headline: p.title,
+                    description: p.description,
                     line: p.lineDate ? fmtDate(p.lineDate) : (p.days <= 0 ? fmtDate(dates[p.at]) : '')
                 })}` : null;
                 // console.log(imageUrl);
@@ -320,7 +321,7 @@ function wrap(ctx, text, maxW) {
     return lines;
 }
 
-async function renderPoster({ bg, eyebrow, headline, line, debug }) {
+async function renderPoster({ bg, eyebrow, headline, description, line, debug }) {
     const tpl = posterTemplates[bg];
     const img = await getBg(bg);
     const canvas = createCanvas(img.width, img.height);
@@ -341,7 +342,8 @@ async function renderPoster({ bg, eyebrow, headline, line, debug }) {
     const blocks = [
         { text: eyebrow && eyebrow.toUpperCase(), k: 0.45 },
         { text: headline, k: 1.4 },
-        { text: line, k: 0.7 }
+        { text: line, k: 0.7, extraSpace: 2.8 }, 
+        { text: description, k: 0.6, widthFactor: 0.75 }
     ].filter(b => b.text);
 
     // micsoreaza fontul
@@ -351,10 +353,13 @@ async function renderPoster({ bg, eyebrow, headline, line, debug }) {
         for (const b of blocks) {
             const size = S * b.k;
             ctx.font = `${size}px ${family}`;
-            const lines = wrap(ctx, b.text, z.w);
+            const currentW = z.w * (b.widthFactor || 1.0);
+            const lines = wrap(ctx, b.text, currentW);
             const lh = size * 1.2;
-            layout.push({ lines, size, lh });
-            h += lines.length * lh + size * 0.5;
+            
+            const blockSpacing = size * 0.5 * (b.extraSpace || 1);
+            layout.push({ lines, size, lh, blockSpacing });
+            h += lines.length * lh + blockSpacing;
         }
         if (h <= z.h) break;
     }
@@ -362,8 +367,11 @@ async function renderPoster({ bg, eyebrow, headline, line, debug }) {
     let y = z.y + (z.h - h) / 2;
     for (const l of layout) {
         ctx.font = `${l.size}px ${family}`;
-        for (const t of l.lines) { ctx.fillText(t, z.x + z.w / 2, y); y += l.lh; }
-        y += l.size * 0.5;
+        for (const t of l.lines) { 
+            ctx.fillText(t, z.x + z.w / 2, y); 
+            y += l.lh; 
+        }
+        y += l.blockSpacing;
     }
     return canvas.toBuffer('image/png');
 }
@@ -371,12 +379,13 @@ async function renderPoster({ bg, eyebrow, headline, line, debug }) {
 // buffer descarca imaginea de aici
 app.get('/api/poster.png', async (req, res) => {
     try {
-        const { bg, eyebrow = '', headline = '', line = '', debug } = req.query;
+        const { bg, eyebrow = '', headline = '', description = '', line = '', debug } = req.query;
         if (!Object.hasOwn(posterTemplates, bg)) return res.status(400).send('Unknown design');
         const png = await renderPoster({
             bg,
             eyebrow: eyebrow.slice(0, 80),
             headline: headline.slice(0, 80),
+            description,
             line: line.slice(0, 120),
             debug: !!debug
         });
