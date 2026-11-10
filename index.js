@@ -20,7 +20,7 @@ app.use(session({
     secret: process.env.SESSION_SECRET,
     resave: false,
     saveUninitialized: false,
-    cookie: { httpOnly: true, secure: process.env.NODE_ENV === 'production', sameSite: 'lax' }
+    cookie: { httpOnly: true, secure: 'auto', sameSite: 'lax' }
 }));
 
 app.use(express.static(path.join(__dirname, 'templates')));
@@ -40,8 +40,12 @@ app.get('/auth/buffer', (req, res) => {
     const challenge = b64url(crypto.createHash('sha256').update(verifier).digest());
     const state = b64url(crypto.randomBytes(16));
 
-    req.session.codeVerifier = verifier;
-    req.session.oauthState = state;
+    const now = Date.now();
+    const existing = Array.isArray(req.session.oauthAttempts) ? req.session.oauthAttempts : [];
+    // Keep a short queue of recent OAuth attempts so parallel clicks/tabs do not break state validation.
+    req.session.oauthAttempts = [...existing, { state, verifier, createdAt: now }]
+        .filter(x => now - x.createdAt < 15 * 60 * 1000)
+        .slice(-10);
 
     const params = new URLSearchParams({
         client_id: process.env.BUFFER_CLIENT_ID,
@@ -53,14 +57,25 @@ app.get('/auth/buffer', (req, res) => {
         code_challenge_method: 'S256',
         prompt: 'consent'
     });
-    res.redirect(`https://auth.buffer.com/auth?${params}`);
+    req.session.save(err => {
+        if (err) return res.status(500).send('Could not start OAuth flow');
+        res.redirect(`https://auth.buffer.com/auth?${params}`);
+    });
 });
 
 
 app.get('/auth/buffer/callback', async (req, res) => {
+    console.log('cookie primit:', !!req.headers.cookie, 'attempts:', req.session.oauthAttempts?.length, 'state primit:', state);
     const { code, state, error } = req.query;
     if (error) return res.redirect('/home');
-    if (state !== req.session.oauthState) return res.status(403).send('Invalid state');
+
+    const attempts = Array.isArray(req.session.oauthAttempts) ? req.session.oauthAttempts : [];
+    const now = Date.now();
+    const validAttempts = attempts.filter(x => now - x.createdAt < 15 * 60 * 1000);
+    const match = validAttempts.find(x => x.state === state);
+    if (!match) return res.status(403).send('Invalid state');
+
+    req.session.oauthAttempts = validAttempts.filter(x => x.state !== state);
 
     const r = await fetch('https://auth.buffer.com/token', {
         method: 'POST',
@@ -71,7 +86,7 @@ app.get('/auth/buffer/callback', async (req, res) => {
         grant_type: 'authorization_code',
         code,
         redirect_uri: process.env.REDIRECT_URI,
-        code_verifier: req.session.codeVerifier
+        code_verifier: match.verifier
         })
     });
     const tokens = await r.json();
