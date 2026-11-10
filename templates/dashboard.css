@@ -214,3 +214,16 @@ input[type="checkbox"]:checked::before {
 #results li { padding: 8px 0; border-bottom: 1px solid var(--border); font-size: 14px; }
 #results li:last-child { border-bottom: none; }
 .ok { color: #138a36; } .warn { color: var(--gray-text); }
+
+
+.btn-mobile-logout {
+    display: none !important;
+}
+@media (max-width: 768px) {
+    .btn-desktop-start {
+        display: none !important;
+    }
+    .btn-mobile-logout {
+        display: inline-flex !important;
+    }
+}
