@@ -7,6 +7,11 @@ const eventTemplates = require('./eventTemplates');
 const fs = require('fs');
 const https = require('https');
 
+// save the events in mongodb
+const mongoose = require('mongoose');
+const MongoStore = require('connect-mongo').default;
+const Event = require('./models/Event');
+
 // posters
 const { createCanvas, loadImage, GlobalFonts } = require('@napi-rs/canvas');
 const posterTemplates = require('./posterTemplates');
@@ -22,6 +27,7 @@ app.use(session({
     secret: process.env.SESSION_SECRET,
     resave: false,
     saveUninitialized: false,
+    store: MongoStore.create({ mongoUrl: process.env.MONGODB_URI }),
     cookie: { httpOnly: true, secure: 'auto', sameSite: 'lax' }
 }));
 
@@ -144,11 +150,27 @@ app.get('/api/me', async (req, res) => {
             `{ channels(input: { organizationId: ${JSON.stringify(org.id)} }) { id name service } }`);
         req.session.channels = channels;
 
+        req.session.userId = account.id;
+        const events = await Event.find({ userId: account.id }).sort({ createdAt: -1 });
+
         res.json({
             // name: account.name,
             email: account.email,
             channels,
-            events: req.session.events || [],
+            events: events.map(e => ({
+                id: e._id,
+                name: e.name,
+                template: e.template,
+                posts: e.posts.filter(p => p.status === 'scheduled').length,
+                postDetails: e.posts.map(p => ({
+                    title: p.title,
+                    channelName: p.channelName,
+                    channelService: p.channelService,
+                    dueAt: p.dueAt,
+                    imageUrl: p.imageUrl,
+                    status: p.status
+                }))
+            })),
             templates: Object.fromEntries(Object.entries(eventTemplates)
                 .map(([k, t]) => [k, { name: t.name, fields: t.fields, kind: t.kind || 'legacy' }])),
             posters: Object.fromEntries(Object.entries(posterTemplates)
@@ -178,6 +200,13 @@ app.post('/api/events', async (req, res) => {
         tags = [],
         poster = ''
     } = req.body;
+
+    if (!req.session.buffer || !req.session.userId) {
+        return res.status(401).json({ error: 'Not connected' });
+    }
+    if (poster && !Object.hasOwn(posterTemplates, poster)) {
+        return res.status(400).json({ error: 'Unknown poster design' });
+    }
     
     const t = eventTemplates[template];
     const chans = (req.session.channels || []).filter(c => channelIds.includes(c.id));
@@ -193,6 +222,16 @@ app.post('/api/events', async (req, res) => {
             error: 'Instagram posts with images require a public image URL. Set PUBLIC_BASE_URL to a public HTTPS domain (for example via a tunnel).'
         });
     }
+
+    const saveEvent = () => Event.create({
+        userId: req.session.userId,
+        name, description, template: t.name, poster, tags, channelIds, dates, options,
+        posts: results.filter(x => x.channelId).map(x => ({
+            title: x.title, channelId: x.channelId, channelName: x.channel,
+            channelService: x.channelService,
+            bufferPostId: x.bufferPostId, dueAt: x.dueAt, imageUrl: x.image, status: x.status
+        }))
+    });
 
     try {
         const templatePosts = typeof t.buildPosts === 'function'
@@ -221,40 +260,41 @@ app.post('/api/events', async (req, res) => {
                     headline: p.title,
                     line: p.lineDate ? fmtDate(p.lineDate) : (p.days <= 0 ? fmtDate(dates[p.at]) : '')
                 })}` : null;
-                const metadata = ch.service === 'instagram'
-                    ? ', metadata: { instagram: { type: post, shouldShareToFeed: true } }'
-                    : '';
-                console.log(imageUrl);
+                // console.log(imageUrl);
 
-                const data = await buffer(req, 
-                    `mutation 
-                    { createPost(
-                        input: {
-                            text: ${JSON.stringify(text)}, 
-                            channelId: ${JSON.stringify(ch.id)},
-                            schedulingType: automatic, 
-                            mode: customScheduled, 
-                            dueAt: ${JSON.stringify(due.toISOString())}
-                            ${metadata}
-                            ${imageUrl ? `, 
-                            assets: [{ image: { url: ${JSON.stringify(imageUrl)} } }]` : ''}
-                        }) 
-                            { ... on PostActionSuccess { 
+                const data = await buffer(req, `
+                    mutation { 
+                        createPost(
+                            input: {
+                                text: ${JSON.stringify(text)}, 
+                                channelId: ${JSON.stringify(ch.id)},
+                                schedulingType: automatic, 
+                                mode: customScheduled, 
+                                dueAt: ${JSON.stringify(due.toISOString())}
+                                ${ch.service === 'instagram' ? ', metadata: { instagram: { type: post, shouldShareToFeed: true } }' : ''}
+                                ${imageUrl ? `, assets: [{ image: { url: ${JSON.stringify(imageUrl)} } }]` : ''}
+                            }
+                        ) { 
+                            ... on PostActionSuccess { 
                                 post { id dueAt } 
-                                } 
-                            ... on MutationError { message } 
                             } 
-                    }`);
+                            ... on MutationError { message } 
+                        } 
+                    }
+                `);
 
                 const r = data.createPost;
 
-                results.push({ title: p.title, channel: ch.name, dueAt: due, image: imageUrl, status: r.post ? 'scheduled' : r.message });
+                results.push({ title: p.title, channel: ch.name, channelId: ch.id, channelService: ch.service, bufferPostId: r.post?.id, dueAt: due, image: imageUrl, status: r.post ? 'scheduled' : r.message });
             }
         }
 
-        req.session.events = [...(req.session.events || []), { name, template: t.name, posts: results.length }];
+        await saveEvent();
         res.json({ results });
-    } catch (e) { res.status(e.status || 500).json({ error: e.message, results }); }
+    } catch (e) {
+        if (results.some(x => x.channelId)) await saveEvent().catch(console.error);
+        res.status(e.status || 500).json({ error: e.message, results });
+    }
 });
 
 // poster generator
@@ -331,7 +371,7 @@ async function renderPoster({ bg, eyebrow, headline, line, debug }) {
 app.get('/api/poster.png', async (req, res) => {
     try {
         const { bg, eyebrow = '', headline = '', line = '', debug } = req.query;
-        if (!posterTemplates[bg]) return res.status(400).send('Unknown design');
+        if (!Object.hasOwn(posterTemplates, bg)) return res.status(400).send('Unknown design');
         const png = await renderPoster({
             bg,
             eyebrow: eyebrow.slice(0, 80),
@@ -344,11 +384,18 @@ app.get('/api/poster.png', async (req, res) => {
 });
 
 
-if (process.env.LOCAL_HTTPS === '1') {
-    https.createServer({
-        key: fs.readFileSync('localhost-key.pem'),
-        cert: fs.readFileSync('localhost.pem')
-    }, app).listen(PORT, () => console.log(`HTTPS local pe https://localhost:${PORT}`));
-} else {
-    app.listen(PORT, () => console.log(`Server is running on port ${PORT}`));
+
+function start() {
+    if (process.env.LOCAL_HTTPS === '1') {
+        https.createServer({
+            key: fs.readFileSync('localhost-key.pem'),
+            cert: fs.readFileSync('localhost.pem')
+        }, app).listen(PORT, () => console.log(`HTTPS local pe https://localhost:${PORT}`));
+    } else {
+        app.listen(PORT, () => console.log(`Server is running on port ${PORT}`));
+    }
 }
+
+mongoose.connect(process.env.MONGODB_URI)
+    .then(() => { console.log('MongoDB connected'); start(); })
+    .catch(err => { console.error('MongoDB connection failed:', err.message); process.exit(1); });

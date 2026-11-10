@@ -41,10 +41,26 @@
         <h2 id="events">Your events</h2>
         <div class="grid grid-3" id="events-list"></div>
 
+        <div id="event-modal" class="event-modal" hidden>
+            <div class="event-modal-backdrop" data-close-modal="1"></div>
+            <div class="event-modal-dialog" role="dialog" aria-modal="true" aria-labelledby="event-modal-title">
+                <button type="button" class="event-modal-close" id="modal-close" aria-label="Close">×</button>
+                <div class="event-modal-head">
+                    <h3 id="event-modal-title">Event post details</h3>
+                    <p id="event-modal-counter" class="subtitle"></p>
+                </div>
+                <div class="event-modal-body">
+                    <button type="button" class="event-modal-arrow" id="modal-prev" aria-label="Previous post">‹</button>
+                    <div id="modal-slide" class="event-modal-slide"></div>
+                    <button type="button" class="event-modal-arrow" id="modal-next" aria-label="Next post">›</button>
+                </div>
+            </div>
+        </div>
+
         <h2 id="new">Start an event</h2>
         <form id="event-form" class="card form">
-            <label>Event name<input name="name" required placeholder="Admission contest 2027"></label>
-            <label>Short description<textarea name="description" rows="2" placeholder="One or two sentences used in the posts"></textarea></label>
+            <label>Event name<input name="name" required placeholder="Your next big event"></label>
+            <label>Description<textarea name="description" rows="3" placeholder="You can say what is the event about and why should people attend."></textarea></label>
             <label>Template<select name="template" id="template"></select></label>
             <p class="subtitle" id="template-hint"></p>
             <fieldset>
@@ -60,7 +76,7 @@
                 <div id="channel-checks"></div>
             </fieldset>
 
-            <label>Hashtags (comma separated)<input name="tags" placeholder="admission, university, 2027"></label>
+            <label>Hashtags (comma separated)<input name="tags" placeholder="event, community, 2027"></label>
 
             <button type="submit" class="btn btn-green" id="submit-btn">Create and schedule everything</button>
         </form>

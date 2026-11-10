@@ -1,5 +1,9 @@
 const $ = id => document.getElementById(id);
 let data;
+let selectedEventId = null;
+let modalPosts = [];
+let modalIndex = 0;
+let modalListenersBound = false;
 
 const nav = document.querySelector('.nav');
 
@@ -10,6 +14,73 @@ function syncNavState() {
 
 window.addEventListener('scroll', syncNavState, { passive: true });
 syncNavState();
+
+function escapeHtml(value) {
+    return String(value || '')
+        .replace(/&/g, '&amp;')
+        .replace(/</g, '&lt;')
+        .replace(/>/g, '&gt;')
+        .replace(/"/g, '&quot;')
+        .replace(/'/g, '&#39;');
+}
+
+function serviceName(service) {
+    if (!service) return 'Platform';
+    if (service === 'twitter') return 'X / Twitter';
+    return service.charAt(0).toUpperCase() + service.slice(1);
+}
+
+function closeEventModal() {
+    $('event-modal').hidden = true;
+    modalPosts = [];
+    modalIndex = 0;
+}
+
+function renderModalSlide() {
+    const slide = $('modal-slide');
+    const counter = $('event-modal-counter');
+    const prev = $('modal-prev');
+    const next = $('modal-next');
+    const post = modalPosts[modalIndex];
+
+    if (!post) {
+        slide.innerHTML = '<p class="subtitle">No post details available.</p>';
+        counter.textContent = '';
+        prev.disabled = true;
+        next.disabled = true;
+        return;
+    }
+
+    const channel = escapeHtml(post.channelName || 'Unknown channel');
+    const service = escapeHtml(post.channelService || '').toLowerCase();
+    const due = post.dueAt ? new Date(post.dueAt).toLocaleDateString('en-GB') : 'No date';
+
+    counter.textContent = `Post ${modalIndex + 1} of ${modalPosts.length}`;
+    prev.disabled = modalIndex <= 0;
+    next.disabled = modalIndex >= modalPosts.length - 1;
+
+    slide.innerHTML = `
+        <article class="platform-preview platform-${service || 'generic'}">
+            <header class="platform-preview-head">
+                <span>${serviceName(service)}</span>
+                <span>${channel}</span>
+            </header>
+            <div class="platform-preview-body">
+                ${post.imageUrl ? `<img class="platform-preview-image" src="${escapeHtml(post.imageUrl)}" alt="Post preview image">` : '<div class="platform-preview-image"></div>'}
+                <h4 class="platform-preview-title">${escapeHtml(post.title || 'Untitled post')}</h4>
+                <p class="platform-preview-meta">${due} · ${escapeHtml(post.status || 'unknown')}</p>
+            </div>
+        </article>
+    `;
+}
+
+function openEventModal(eventObj) {
+    modalPosts = Array.isArray(eventObj?.postDetails) ? eventObj.postDetails : [];
+    modalIndex = 0;
+    $('event-modal-title').textContent = `${eventObj.name} posts`;
+    $('event-modal').hidden = false;
+    renderModalSlide();
+}
 
 async function init() {
     const r = await fetch('/api/me');
@@ -30,10 +101,30 @@ async function init() {
         <div><h3 style="margin:0;font-size:16px">${c.name}</h3><p class="label">${c.service}</p></div></div>`).join('')
         || '<p class="subtitle">No channels yet. Connect one in Buffer.</p>';
 
-    $('events-list').innerHTML = data.events.map(e => `
-        <article class="card"><p class="label">${e.template}</p><h3>${e.name}</h3>
-        <p class="card-text">${e.posts} posts scheduled</p></article>`).join('')
-        || '<p class="subtitle">No events yet. Start one below.</p>';
+    function renderEvents() {
+        const list = $('events-list');
+        list.innerHTML = data.events.map(e => `
+            <article class="card event-card" data-event-id="${e.id}">
+                <p class="label">${e.template}</p>
+                <h3>${e.name}</h3>
+                <p class="card-text">${e.posts} posts scheduled</p>
+                <p class="event-click-hint">Click for details</p>
+            </article>`).join('') || '<p class="subtitle">No events yet. Start one below.</p>';
+
+        list.querySelectorAll('[data-event-id]').forEach(el => {
+            el.addEventListener('click', () => {
+                selectedEventId = el.getAttribute('data-event-id');
+                const eventObj = data.events.find(x => String(x.id) === String(selectedEventId));
+                if (eventObj) openEventModal(eventObj);
+            });
+        });
+
+        if (!data.events.length) {
+            selectedEventId = null;
+        }
+    }
+
+    renderEvents();
 
     $('channel-checks').innerHTML = data.channels.map(c =>
         `<label><input type="checkbox" value="${c.id}" checked> ${c.name} (${c.service})</label>`).join('');
@@ -101,33 +192,72 @@ async function init() {
         if (tpl.kind === 'single-stage') {
             hint.textContent = 'Single-stage flow: event day, optional advance announcement, optional thank-you post.';
             host.className = 'grid grid-2';
+            
             host.innerHTML = `
                 <label>Event day
                     <input type="date" name="date_eventDay" required>
                 </label>
-                <label>
-                    <input type="checkbox" id="single-announce-enabled" name="single_announceEnabled">
-                    Publish an advance announcement
-                </label>
-                <label>Advance post date
-                    <input type="date" id="single-announce-date" name="single_announceDate" disabled>
-                </label>
-                <label>
-                    <input type="checkbox" id="single-thankyou-enabled" name="single_thankYouEnabled">
-                    Publish a thank-you post
-                </label>
-                <label>Thank-you message
-                    <textarea name="single_thankYouText" rows="3" placeholder="Thank you for joining us!"></textarea>
-                </label>
-                <label>Thank-you date (optional)
-                    <input type="date" id="single-thankyou-date" name="single_thankYouDate" disabled>
-                    <small id="single-thankyou-fallback" class="subtitle" hidden>If this date is empty, the thank-you post will be published 7 days after event day.</small>
-                </label>
+                <br>
+
+                <div class="conditional-row">
+                    <label class="checkbox-label">
+                        <input type="checkbox" id="single-announce-enabled" name="single_announceEnabled">
+                        <span>Publish an advance announcement</span>
+                    </label>
+
+                    <div id="single-announce-date-wrap" class="conditional-reveal" hidden>
+                        <label>Advance post date
+                            <input type="date" id="single-announce-date" name="single_announceDate" disabled>
+                        </label>
+                    </div>
+                </div>
+
+                <div class="conditional-row">
+                    <label class="checkbox-label">
+                        <input type="checkbox" id="single-thankyou-enabled" name="single_thankYouEnabled">
+                        <span>Publish a thank-you post</span>
+                    </label>
+
+                    <div id="single-thankyou-fields" class="conditional-reveal" hidden>
+                        <label>Thank-you message
+                            <textarea name="single_thankYouText" rows="3" placeholder="e.g. Thank you for joining us!"></textarea>
+                        </label>
+
+                        <label>Thank-you date (optional)
+                            <input type="date" id="single-thankyou-date" name="single_thankYouDate" disabled>
+                        </label>
+
+                        <small id="single-thankyou-fallback" class="subtitle">
+                            If this date is empty, the thank-you post will be published 7 days after event day.
+                        </small>
+                    </div>
+                </div>
             `;
+
+            const announceCheckbox = document.getElementById('single-announce-enabled');
+            const announceDateWrap = document.getElementById('single-announce-date-wrap');
+            const announceDate = document.getElementById('single-announce-date');
+
+            announceCheckbox.addEventListener('change', () => {
+                announceDateWrap.hidden = !announceCheckbox.checked;
+                announceDate.disabled = !announceCheckbox.checked;
+            });
+
+            const thankyouCheckbox = document.getElementById('single-thankyou-enabled');
+            const thankyouFields = document.getElementById('single-thankyou-fields');
+            const thankyouDate = document.getElementById('single-thankyou-date');
+
+            thankyouCheckbox.addEventListener('change', () => {
+                thankyouFields.hidden = !thankyouCheckbox.checked;
+                thankyouDate.disabled = !thankyouCheckbox.checked;
+            });
+
             $('single-announce-enabled').addEventListener('change', syncSingleStageControls);
             $('single-thankyou-enabled').addEventListener('change', syncSingleStageControls);
             $('single-thankyou-date').addEventListener('input', syncSingleStageControls);
+
             syncSingleStageControls();
+
             return;
         }
 
@@ -212,6 +342,36 @@ async function init() {
         renderTemplateFields();
         updatePreview();
     });
+
+    if (!modalListenersBound) {
+        $('modal-close').addEventListener('click', closeEventModal);
+        $('event-modal').addEventListener('click', e => {
+            if (e.target.closest('[data-close-modal="1"]')) closeEventModal();
+        });
+        $('modal-prev').addEventListener('click', () => {
+            if (modalIndex <= 0) return;
+            modalIndex -= 1;
+            renderModalSlide();
+        });
+        $('modal-next').addEventListener('click', () => {
+            if (modalIndex >= modalPosts.length - 1) return;
+            modalIndex += 1;
+            renderModalSlide();
+        });
+        document.addEventListener('keydown', e => {
+            if ($('event-modal').hidden) return;
+            if (e.key === 'Escape') closeEventModal();
+            if (e.key === 'ArrowLeft' && modalIndex > 0) {
+                modalIndex -= 1;
+                renderModalSlide();
+            }
+            if (e.key === 'ArrowRight' && modalIndex < modalPosts.length - 1) {
+                modalIndex += 1;
+                renderModalSlide();
+            }
+        });
+        modalListenersBound = true;
+    }
 
     $('event-form').addEventListener('submit', async e => {
         e.preventDefault();
