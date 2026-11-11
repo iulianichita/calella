@@ -27,6 +27,34 @@ modalEditToggle?.addEventListener('click', () => {
     syncModalEditorVisibility();
 });
 
+const modalDelToggle = $('event-modal-del-toggle');
+modalDelToggle?.addEventListener('click', async () => {
+    syncModalEditorVisibility();
+    const eventId = selectedEventId; 
+    const userInput = prompt('Please type DELETE to PERMANENTLY delete this event:');
+
+    if (userInput === 'DELETE') {
+        try {
+            const response = await fetch(`/api/events/${eventId}`, {
+                method: 'DELETE'
+            });
+
+            if (!response.ok) {
+                throw new Error('Deleting error');
+            }
+
+            // alert('Evenimentul a fost sters cu succes!');
+            window.location.reload(); 
+
+        } catch (err) {
+            console.error(err);
+        }
+    } else {
+        console.log('DELETE operation canceled.');
+        alert('DELETE operation canceled.');
+    }
+});
+
 function escapeHtml(value) {
     return String(value || '')
         .replace(/&/g, '&amp;')
@@ -224,6 +252,27 @@ function backToPreview() {
     syncModalEditorVisibility();
 }
 
+async function reloadAfterDelete() {
+    const details = await loadEventDetails(selectedEventId);
+    editEventState = details;
+    modalPosts = Array.isArray(details.posts) ? details.posts.filter(Boolean) : [];
+    modalIndex = 0;
+    modalPlatform = getGroupedModalPosts(modalPosts)[0]?.key || '';
+
+    if (!modalPosts.length) {
+        // nu mai sunt postari: inchide modalul si reimprospateaza dashboard-ul
+        init();
+        closeEventModal();
+        return;
+    }
+
+    renderPlatformTabs();
+    renderModalSlide();
+    renderEditPanel();
+    backToPreview();
+    init();
+}
+
 function renderEditPanel() {
     const form = $('event-edit-form');
     if (!form || !editEventState) return;
@@ -374,28 +423,43 @@ function renderEditPanel() {
         });
     });
 
-    form.querySelector('#delete-current-post')?.addEventListener('click', () => {
+    form.querySelector('#delete-current-post')?.addEventListener('click', async () => {
         const groups = getGroupedModalPosts(editEventState.posts);
         const activeGroup = groups.find(group => group.key === modalPlatform) || groups[0];
         if (!activeGroup?.posts?.length) return;
         const current = activeGroup.posts[modalIndex] || activeGroup.posts[0];
-        const key = getPostKey(current);
-        editEventState.posts = editEventState.posts.filter(item => getPostKey(item) !== key);
-        modalIndex = 0;
-        const nextGroups = getGroupedModalPosts(editEventState.posts);
-        modalPlatform = nextGroups[0]?.key || '';
-        
-        backToPreview();
+        if (!current?.id) return;
+        if (!confirm('Delete this post?')) return;
+
+        const r = await fetch(
+            `/api/events/${encodeURIComponent(selectedEventId)}/posts/${encodeURIComponent(current.id)}`,
+            { method: 'DELETE' }
+        );
+        const body = await r.json().catch(() => ({}));
+        if (!r.ok) {
+            alert(body.error || 'Could not delete the post.');
+            return;
+        }
+
+        await reloadAfterDelete();
     });
 
-    form.querySelector('#delete-platform-posts')?.addEventListener('click', () => {
+    form.querySelector('#delete-platform-posts')?.addEventListener('click', async () => {
         const platform = modalPlatform;
-        editEventState.posts = (editEventState.posts || []).filter(post => (post.channelService || '').toLowerCase() !== platform);
-        modalIndex = 0;
-        const nextGroups = getGroupedModalPosts(editEventState.posts);
-        modalPlatform = nextGroups[0]?.key || '';
+        if (!platform) return;
+        if (!confirm(`Delete all posts on ${platform}?`)) return;
 
-        backToPreview();
+        const r = await fetch(
+            `/api/events/${encodeURIComponent(selectedEventId)}/platform/${encodeURIComponent(platform)}`,
+            { method: 'DELETE' }
+        );
+        const body = await r.json().catch(() => ({}));
+        if (!r.ok) {
+            alert(body.error || 'Could not delete the posts.');
+            return;
+        }
+
+        await reloadAfterDelete();
     });
 
     form.addEventListener('submit', async e => {
@@ -869,10 +933,18 @@ async function init() {
 
             const box = $('results');
             box.hidden = false;
-            box.innerHTML = `<h3>${r.ok ? 'Done' : 'Something went wrong: ' + out.error}</h3><ul>` +
-                (out.results || []).map(x => `<li><b>${x.title}</b>${x.channel ? ' · ' + x.channel : ''}
-                ${x.dueAt ? ' · ' + new Date(x.dueAt).toLocaleDateString('en-GB') : ''}
-                · <span class="${x.status === 'scheduled' ? 'ok' : 'warn'}">${x.status}</span>${x.image ? `<br><a href="${x.image}" target="_blank"><img class="res-img" src="${x.image}" alt=""></a>` : ''}</li>`).join('') + '</ul>';
+            box.innerHTML = `<div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px;">
+                <h3 style="margin: 0;">${r.ok ? 'Done' : 'Something went wrong: ' + out.error}</h3>
+                <button type="button" id="close-box-btn" style="background: none; border: none; font-size: 20px; cursor: pointer; padding: 0 5px;" title="Close">&times;</button>
+            </div><ul>` + 
+            (out.results || []).map(x => `<li><b>${x.title}</b>${x.channel ? ' · ' + x.channel : ''}
+            ${x.dueAt ? ' · ' + new Date(x.dueAt).toLocaleDateString('en-GB') : ''}
+            · <span class="${x.status === 'scheduled' ? 'ok' : 'warn'}">${x.status}</span>${x.image ? `<br><a href="${x.image}" target="_blank"><img class="res-img" src="${x.image}" alt=""></a>` : ''}</li>`).join('') + '</ul>';
+
+            // hide box when clicking on close button from box
+            box.querySelector('#close-box-btn')?.addEventListener('click', () => {
+                box.hidden = true;
+            });
 
             if (r.ok) init();
         } catch (err) {

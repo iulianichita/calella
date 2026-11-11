@@ -51,7 +51,9 @@
                     <div class="event-modal-title-row">
                         <h3 id="event-modal-title">Event post details</h3>
                         <div class="event-modal-actions">
+                            <button type="button" id="event-modal-del-toggle" class="event-modal-del-toggle">Delete event</button>
                             <button type="button" id="event-modal-edit-toggle" class="event-modal-edit-toggle">Edit</button>
+                            <span class="modal-divider"></span>
                             <div id="event-modal-platforms" class="event-modal-platforms" aria-label="Platform filter"></div>
                         </div>
                     </div>
@@ -80,10 +82,10 @@
 
                 <div class="event-fields">
                     <label>Event name<input name="name" required placeholder="Your next big event"></label>
-                    <label>Description<textarea name="description" rows="4" placeholder="You can add details about the event and why people should attend. The description will appear on the event poster and will be formatted for each platform."></textarea></label>
+                    <label>Poster description (captions will be auto-generated)<textarea name="description" rows="4" placeholder="You can add details about the event and why people should attend. The description will appear on the event poster and will be formatted for each platform."></textarea></label>
                     <label>Template<select name="template" id="template"></select></label>
                     <p class="subtitle" id="template-hint"></p>
-                    <fieldset>
+                    <fieldset id="poster-designs">
                         <legend>Poster design</legend>
                         <div id="poster-picker" class="poster-picker"></div>
                     </fieldset>

@@ -314,6 +314,71 @@ app.put('/api/events/:id', async (req, res) => {
     }
 });
 
+// sterge intreg event-ul
+app.delete('/api/events/:id', async (req, res) => {
+    try {
+        if (!req.session.buffer || !req.session.userId) {
+            return res.status(401).json({ error: 'Not connected' });
+        }
+
+        const event = await Event.findOne({ _id: req.params.id, userId: req.session.userId });
+        if (!event) return res.status(404).json({ error: 'Event not found' });
+
+        // to do: apelul GraphQL catre API-ul Buffer
+
+        await event.deleteOne();
+        res.json({ success: true, message: 'Event deleted successfully' });
+    } catch (e) {
+        res.status(500).json({ error: e.message });
+    }
+});
+
+// sterge o singura postare dintr-un eveniment
+app.delete('/api/events/:id/posts/:postId', async (req, res) => {
+    try {
+        if (!req.session.buffer || !req.session.userId) {
+            return res.status(401).json({ error: 'Not connected' });
+        }
+
+        const event = await Event.findOne({ _id: req.params.id, userId: req.session.userId });
+        if (!event) return res.status(404).json({ error: 'Event not found' });
+
+        const post = event.posts.id(req.params.postId);
+        if (!post) return res.status(404).json({ error: 'Post not found' });
+
+        // to do: apelul GraphQL catre API-ul Buffer (sterge post.bufferPostId)
+
+        post.deleteOne();
+        await event.save();
+        res.json({ success: true });
+    } catch (e) {
+        res.status(500).json({ error: e.message });
+    }
+});
+
+// sterge toate postarile de pe o platforma
+app.delete('/api/events/:id/platform/:service', async (req, res) => {
+    try {
+        if (!req.session.buffer || !req.session.userId) {
+            return res.status(401).json({ error: 'Not connected' });
+        }
+
+        const event = await Event.findOne({ _id: req.params.id, userId: req.session.userId });
+        if (!event) return res.status(404).json({ error: 'Event not found' });
+
+        const service = req.params.service.toLowerCase();
+        const toDelete = event.posts.filter(p => (p.channelService || '').toLowerCase() === service);
+
+        // to do: apelul GraphQL catre API-ul Buffer (sterge fiecare toDelete[i].bufferPostId)
+
+        event.posts = event.posts.filter(p => (p.channelService || '').toLowerCase() !== service);
+        await event.save();
+        res.json({ success: true, deleted: toDelete.length });
+    } catch (e) {
+        res.status(500).json({ error: e.message });
+    }
+});
+
 // const { GoogleGenAI } = require('@google/genai');
 // const ai = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY });
 
