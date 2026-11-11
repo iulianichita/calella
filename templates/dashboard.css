@@ -73,6 +73,7 @@
 .btn.btn-small:hover {background: var(--green-hover); color: #fff}
 .nav-links a.btn.btn-small:hover { color: #fff; }
 .nav-links a.btn {color: #fff;}
+a.disconnect-btn:hover {color: rgb(154, 14, 14);}
 
 .poster-picker { display: flex; flex-wrap: wrap; gap: 14px; margin-top: 8px; }
 .poster-opt { position: relative; display: flex; flex-direction: column; align-items: center; gap: 6px; width: 110px; cursor: pointer; font-size: 12px; }

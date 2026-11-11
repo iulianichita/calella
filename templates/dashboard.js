@@ -84,7 +84,7 @@ function openEventModal(eventObj) {
 
 async function init() {
     const r = await fetch('/api/me');
-    // if (!r.ok) return (location.href = '/home');
+    if (!r.ok) return (location.href = '/home');
     data = await r.json();
 
     const name = data.email.split('@')[0];
@@ -127,7 +127,37 @@ async function init() {
     renderEvents();
 
     $('channel-checks').innerHTML = data.channels.map(c =>
-        `<label><input type="checkbox" value="${c.id}" checked> ${c.name} (${c.service})</label>`).join('');
+        `<label><input type="checkbox" value="${c.id}|${c.service}" checked> ${c.name} (${c.service})</label>`).join('');
+
+    // nu permite postari pe ig fara imagini
+    function checkInstagramChannels() {
+        const checkedBoxes = $('channel-checks').querySelectorAll('input[type="checkbox"]:checked');
+        const hasInstagram = Array.from(checkedBoxes).some(cb => cb.value.includes('instagram'));
+        const selectedPoster = document.querySelector('input[name="poster"]:checked')?.value;
+        
+        // console.log(hasInstagram);
+        // console.log(selectedPoster);
+
+        const submitBtn = $('submit-btn');
+        
+        let msgContainer = $('ig-error-msg');
+        if (!msgContainer) {
+            msgContainer = document.createElement('div');
+            msgContainer.id = 'ig-error-msg';
+            msgContainer.className = 'subtitle';
+            msgContainer.style.fontSize = 'smaller'; 
+            msgContainer.style.marginTop = '0px';
+            submitBtn.insertAdjacentElement('afterend', msgContainer);
+        }
+
+        if (hasInstagram && selectedPoster === "") {
+            submitBtn.disabled = true;
+            msgContainer.textContent = 'Posting to Instagram is not possible without a template.';
+        } else {
+            submitBtn.disabled = false;
+            msgContainer.textContent = '';
+        }
+    }
 
     $('template').innerHTML = Object.entries(data.templates)
         .map(([k, t]) => `<option value="${k}">${t.name}</option>`).join('');
@@ -141,6 +171,10 @@ async function init() {
                 <img src="${p.url}" alt="${p.name}"><span>${p.name}</span>
             </label>`).join('');
     updatePreview();
+    
+    $('channel-checks').addEventListener('change', checkInstagramChannels);
+    $('poster-picker').addEventListener('change', checkInstagramChannels);
+    checkInstagramChannels();
 
     $('poster-picker').addEventListener('change', updatePreview);
     $('event-form').elements['name', 'description'].addEventListener('input', updatePreview);
