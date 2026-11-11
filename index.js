@@ -145,7 +145,7 @@ async function buffer(req, query) {
 
 app.get('/api/me', async (req, res) => {
     try {
-        const { account } = await buffer(req, '{ account { id email organizations { id name } } }');
+        const { account } = await buffer(req, '{ account { id email name organizations { id name } } }');
         const org = account.organizations[0];
         const { channels } = await buffer(req,
             `{ channels(input: { organizationId: ${JSON.stringify(org.id)} }) { id name service } }`);
@@ -153,18 +153,25 @@ app.get('/api/me', async (req, res) => {
 
         req.session.userId = account.id;
         const events = await Event.find({ userId: account.id }).sort({ createdAt: -1 });
+        // console.log(account);
 
         res.json({
-            // name: account.name,
+            name: account.name,
             email: account.email,
             channels,
             events: events.map(e => ({
                 id: e._id,
                 name: e.name,
                 template: e.template,
+                description: e.description,
+                poster: e.poster,
+                dates: e.dates ? Object.fromEntries(e.dates.entries()) : {},
+                options: e.options || {},
                 posts: e.posts.filter(p => p.status === 'scheduled').length,
                 postDetails: e.posts.map(p => ({
+                    id: p._id,
                     title: p.title,
+                    text: p.text,
                     channelName: p.channelName,
                     channelService: p.channelService,
                     dueAt: p.dueAt,
@@ -180,15 +187,178 @@ app.get('/api/me', async (req, res) => {
     } catch (e) { res.status(e.status || 500).json({ error: e.message }); }
 });
 
-// create event
-const adapt = (service, text, tags) => {
-    const hashtags = tags.map(t => '#' + t.replace(/\W/g, '')).join(' ');
+app.get('/api/events/:id', async (req, res) => {
+    try {
+        if (!req.session.buffer || !req.session.userId) {
+            return res.status(401).json({ error: 'Not connected' });
+        }
 
-    if (service === 'linkedin') return `${text}\n\n${hashtags}`.trim();
-    if (service === 'twitter') return text.slice(0, 240);
+        const event = await Event.findOne({ _id: req.params.id, userId: req.session.userId });
+        if (!event) return res.status(404).json({ error: 'Event not found' });
 
-    return `${text}\n\n${hashtags}`.trim();
-};
+        res.json({
+            id: event._id,
+            name: event.name,
+            description: event.description || '',
+            template: Object.keys(eventTemplates).find(k => eventTemplates[k].name === event.template) || event.template,
+            poster: event.poster || '',
+            dates: event.dates ? Object.fromEntries(event.dates.entries()) : {},
+            options: event.options || {},
+            tags: event.tags || [],
+            channelIds: event.channelIds || [],
+            posts: (event.posts || []).map(p => ({
+                id: p._id,
+                title: p.title,
+                text: p.text,
+                channelId: p.channelId,
+                channelName: p.channelName,
+                channelService: p.channelService,
+                dueAt: p.dueAt,
+                imageUrl: p.imageUrl,
+                status: p.status
+            }))
+        });
+    } catch (e) {
+        res.status(500).json({ error: e.message });
+    }
+});
+
+app.put('/api/events/:id', async (req, res) => {
+    try {
+        if (!req.session.buffer || !req.session.userId) {
+            return res.status(401).json({ error: 'Not connected' });
+        }
+
+        const event = await Event.findOne({ _id: req.params.id, userId: req.session.userId });
+        if (!event) return res.status(404).json({ error: 'Event not found' });
+
+        const {
+            name,
+            description = '',
+            template,
+            dates = {},
+            options = {},
+            poster = '',
+            posts = []
+        } = req.body || {};
+
+        if (!template || !eventTemplates[template]) {
+            return res.status(400).json({ error: 'Unknown event template' });
+        }
+        const templateName = eventTemplates[template].name;
+
+        // const base = process.env.PUBLIC_BASE_URL || `${req.protocol}://${req.get('host')}`;
+        const base = `${req.protocol}://${req.get('host')}`;
+        const fmtDate = d => new Date(d).toLocaleDateString('en-GB', { day: 'numeric', month: 'long' });
+        const finalName = name || event.name;
+        
+        // console.log(event);
+        // console.log(req.body);
+
+        // reface caption (text field)
+        const fmtShort = d => new Date(d).toLocaleDateString('en-GB', { day: 'numeric', month: 'long' });
+
+        const textForTitle = title => {
+            if (title === 'Event announcement') {
+                return `${name} is coming on ${fmtShort(dates.eventDay)}. ${description}`.trim();
+            }
+            if (title === 'Event day') {
+                return `Today is the day: ${name}!`;
+            }
+            if (title === 'Thank you') {
+                return (options.thankYouText || '').trim() || `Thank you to everyone who joined ${finalName}.`;
+            }
+            return null;
+        };
+
+        const nextPosts = posts.map(post => {
+            const rawText = textForTitle(post.title);
+            const serviceKey = (post.channelService || '').toLowerCase();
+            const captions = rawText !== null
+                ? generateCaptionsForPlatforms(name, rawText, event.tags)
+                : null;
+
+            return {
+                title: post.title || 'Untitled post',
+                text: captions
+                    ? (captions[serviceKey] || captions.facebook)
+                    : (post.text ?? ''),
+                channelId: post.channelId || '',
+                channelName: post.channelName || '',
+                channelService: post.channelService || '',
+                dueAt: post.dueAt ? new Date(post.dueAt) : undefined,
+                imageUrl: poster ? `${base}/api/poster.png?${new URLSearchParams({
+                    bg: poster,
+                    eyebrow: finalName,
+                    headline: post.title || '',
+                    description,
+                    line: post.dueAt ? fmtDate(post.dueAt) : ''
+                })}` : '',
+                status: post.status || 'scheduled'
+            }
+        });
+
+        event.name = name || event.name;
+        event.description = description;
+        event.template = templateName;
+        event.poster = poster;
+        event.dates = new Map(Object.entries(dates || {}));
+        event.options = options || {};
+        event.posts = nextPosts;
+
+        await event.save();
+        // console.log(event);
+        res.json({ success: true, event: { id: event._id, name: event.name } });
+    } catch (e) {
+        res.status(500).json({ error: e.message });
+    }
+});
+
+// const { GoogleGenAI } = require('@google/genai');
+// const ai = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY });
+
+async function generateCaptionsForPlatformsWithGemini(eventName, rawPostText, description, tags) {
+    try {
+        const prompt = `You are an expert social media manager. Based on the event name "${eventName}", event description "${description}", the original post text "${rawPostText}", and tags ${JSON.stringify(tags)}, generate tailored social media captions in English for each platform:
+        1. LinkedIn (professional, career/education-oriented, include hashtags)
+        2. X (short, concise, under 280 characters, with relevant hashtags)
+        3. Instagram (visually engaging, uses emojis, plenty of hashtags)
+        4. Facebook (informative, friendly, community-oriented, include hashtags)
+
+        Return STRICTLY a valid JSON object (no markdown formatting, no extra text) with the following structure:
+        {"linkedin": "...", "x": "...", "instagram": "...", "facebook": "..."}`;
+
+        const response = await ai.models.generateContent({
+            model: 'gemini-3.8-flash',
+            contents: prompt,
+            config: { responseMimeType: 'application/json' }
+        });
+
+        return JSON.parse(response.text);
+    } catch (err) {
+        console.error('Gemini Error, falling back to default text:', err);
+        const fallbackTags = tags.map(t => '#' + t.replace(/\W/g, '')).join(' ');
+        const baseText = `${rawPostText}\n\n${fallbackTags}`.trim();
+        return {
+            linkedin: baseText,
+            x: baseText,
+            instagram: baseText,
+            facebook: baseText
+        };
+    }
+}
+
+function generateCaptionsForPlatforms(eventName, rawPostText, tags) {
+    const formattedTags = tags.map(t => '#' + t.replace(/\W/g, '')).join(' ');
+    const baseText = `${rawPostText}\n\n${formattedTags}`.trim();
+
+    return {
+        linkedin: `Excited to announce ${eventName}!\n\n${rawPostText}\n\n${formattedTags} #professional #networking`,
+        x: baseText,
+        instagram: `${rawPostText}\n\n${formattedTags} #event #community`,
+        facebook: `We are happy to share updates about ${eventName}.\n\n${baseText}`
+    };
+}
 
 app.post('/api/events', async (req, res) => {
     const {
@@ -197,10 +367,12 @@ app.post('/api/events', async (req, res) => {
         template,
         dates = {},
         options = {},
-        channelIds = [],
+        channels = [],
         tags = [],
         poster = ''
     } = req.body;
+
+    const channelIds = channels.map(id => String(id).split('|')[0]);
 
     if (!req.session.buffer || !req.session.userId) {
         return res.status(401).json({ error: 'Not connected' });
@@ -210,7 +382,9 @@ app.post('/api/events', async (req, res) => {
     }
     
     const t = eventTemplates[template];
+    // console.log(t);
     const chans = (req.session.channels || []).filter(c => channelIds.includes(c.id));
+    // console.log(chans, channelIds);
     if (!t || !chans.length) return res.status(400).json({ error: 'Pick a template and a channel' });
 
     const results = [];
@@ -228,7 +402,7 @@ app.post('/api/events', async (req, res) => {
         userId: req.session.userId,
         name, description, template: t.name, poster, tags, channelIds, dates, options,
         posts: results.filter(x => x.channelId).map(x => ({
-            title: x.title, channelId: x.channelId, channelName: x.channel,
+            title: x.title, text: x.text, channelId: x.channelId, channelName: x.channel,
             channelService: x.channelService,
             bufferPostId: x.bufferPostId, dueAt: x.dueAt, imageUrl: x.image, status: x.status
         }))
@@ -245,7 +419,7 @@ app.post('/api/events', async (req, res) => {
                 : new Date(`${dates[p.at]}T10:00:00.000Z`);
 
             if (!p.dueDate) {
-                due.setUTCDate(due.getUTCDate() + p.days);
+                due.setUTCDate(due.getUTCDate() + 30);
             }
 
             if (isNaN(due) || due < new Date()) {
@@ -253,47 +427,58 @@ app.post('/api/events', async (req, res) => {
                 continue;
             }
 
+            const rawPostText = typeof p.text === 'function' ? p.text({ name, description, dates }) : p.text;
+            const platformCaptions = await generateCaptionsForPlatforms(name, rawPostText, tags);
+
             for (const ch of chans) {
-                const text = adapt(ch.service, p.text({ name, description, dates }), tags);
+                const serviceKey = ch.service.toLowerCase();
+                let text = platformCaptions[serviceKey] || platformCaptions.facebook || rawPostText;
+
                 const imageUrl = poster ? `${base}/api/poster.png?${new URLSearchParams({
                     bg: poster,
                     eyebrow: name,
                     headline: p.title,
-                    description: p.description,
+                    description: description,
                     line: p.lineDate ? fmtDate(p.lineDate) : (p.days <= 0 ? fmtDate(dates[p.at]) : '')
                 })}` : null;
-                // console.log(imageUrl);
 
-                const data = await buffer(req, `
-                    mutation { 
-                        createPost(
-                            input: {
-                                text: ${JSON.stringify(text)}, 
-                                channelId: ${JSON.stringify(ch.id)},
-                                schedulingType: automatic, 
-                                mode: customScheduled, 
-                                dueAt: ${JSON.stringify(due.toISOString())}
-                                ${ch.service === 'instagram' ? ', metadata: { instagram: { type: post, shouldShareToFeed: true } }' : ''}
-                                ${imageUrl ? `, assets: [{ image: { url: ${JSON.stringify(imageUrl)} } }]` : ''}
-                            }
-                        ) {
-                            ... on PostActionSuccess { 
-                                post { id dueAt } 
-                            } 
-                            ... on MutationError { message } 
-                        } 
-                    }
-                `);
+                // const data = await buffer(req, `
+                //     mutation { 
+                //         createPost(
+                //             input: {
+                //                 text: ${JSON.stringify(text)}, 
+                //                 channelId: ${JSON.stringify(ch.id)},
+                //                 schedulingType: automatic, 
+                //                 mode: customScheduled, 
+                //                 dueAt: ${JSON.stringify(due.toISOString())}
+                //                 ${ch.service === 'instagram' ? ', metadata: { instagram: { type: post, shouldShareToFeed: true } }' : ''}
+                //                 ${imageUrl ? `, assets: [{ image: { url: ${JSON.stringify(imageUrl)} } }]` : ''}
+                //             }
+                //         ) {
+                //             ... on PostActionSuccess { 
+                //                 post { id dueAt } 
+                //             } 
+                //             ... on MutationError { message } 
+                //         } 
+                //     }
+                // `);
 
-                const r = data.createPost;
+                // const r = data.createPost;
 
-                results.push({ title: p.title, channel: ch.name, channelId: ch.id, channelService: ch.service, bufferPostId: r.post?.id, dueAt: due, image: imageUrl, status: r.post ? 'scheduled' : r.message });
+                results.push({ title: p.title, text, channel: ch.name, channelId: ch.id, channelService: ch.service, 
+                    bufferPostId: 1,
+                    // bufferPostId: r.post?.id, 
+                    dueAt: due, image: imageUrl, 
+                    status: 'scheduled'
+                    // status: r.post ? 'scheduled' : r.message 
+                });
             }
         }
 
         await saveEvent();
         res.json({ results });
     } catch (e) {
+        console.error(e.stack);
         if (results.some(x => x.channelId)) await saveEvent().catch(console.error);
         res.status(e.status || 500).json({ error: e.message, results });
     }

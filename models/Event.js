@@ -11,6 +11,7 @@ const eventSchema = new mongoose.Schema({
     dates: { type: Map, of: String },
     posts: [{
         title: String,
+        text: String,
         channelId: String,
         channelName: String,
         channelService: String,

@@ -35,8 +35,9 @@
             <div class="card"><p class="label">Events</p><h3 id="stat-events">-</h3></div>
             <div class="card"><p class="label">Posts scheduled</p><h3 id="stat-posts">-</h3></div>
         </div>
+        <p class="subtitle">Please note that your active Buffer plan limits apply to this application.</p>
 
-        <h2 id="channels">Your Buffer channels</h2>
+        <h2 id="channels">Your channels</h2>
         <div class="grid grid-3" id="channels-list"></div>
 
         <h2 id="events">Your events</h2>
@@ -47,40 +48,59 @@
             <div class="event-modal-dialog" role="dialog" aria-modal="true" aria-labelledby="event-modal-title">
                 <button type="button" class="event-modal-close" id="modal-close" aria-label="Close">×</button>
                 <div class="event-modal-head">
-                    <h3 id="event-modal-title">Event post details</h3>
+                    <div class="event-modal-title-row">
+                        <h3 id="event-modal-title">Event post details</h3>
+                        <div class="event-modal-actions">
+                            <button type="button" id="event-modal-edit-toggle" class="event-modal-edit-toggle">Edit</button>
+                            <div id="event-modal-platforms" class="event-modal-platforms" aria-label="Platform filter"></div>
+                        </div>
+                    </div>
                     <p id="event-modal-counter" class="subtitle"></p>
                 </div>
-                <div class="event-modal-body">
+                <div class="event-modal-body" id="event-modal-body">
                     <button type="button" class="event-modal-arrow" id="modal-prev" aria-label="Previous post">‹</button>
                     <div id="modal-slide" class="event-modal-slide"></div>
                     <button type="button" class="event-modal-arrow" id="modal-next" aria-label="Next post">›</button>
+                </div>
+                <div id="event-modal-editor" class="event-modal-editor" hidden>
+                    <form id="event-edit-form" class="event-edit-form form"></form>
                 </div>
             </div>
         </div>
 
         <h2 id="new">Start an event</h2>
         <form id="event-form" class="card form">
-            <label>Event name<input name="name" required placeholder="Your next big event"></label>
-            <label>Description<textarea name="description" rows="3" placeholder="You can say what is the event about and why should people attend."></textarea></label>
-            <label>Template<select name="template" id="template"></select></label>
-            <p class="subtitle" id="template-hint"></p>
-            <fieldset>
-                <legend>Poster design</legend>
-                <div id="poster-picker" class="poster-picker"></div>
-                <img id="poster-preview" class="poster-preview" alt="Poster preview" hidden>
-            </fieldset>
+            <div class="event-layout">
+                <aside class="event-side">
+                    <h3 id="poster-preview-title">Poster Preview</h3>
+                    <img id="poster-preview" class="poster-preview" alt="Poster preview" hidden>
+                    <p id="poster-preview-empty" class="subtitle" hidden>You chose not to have a poster.
+                        <br>Please note: Instagram posts are not supported without a selected poster.</p>
+                </aside>
 
-            <div id="template-fields" class="grid grid-3"></div>
+                <div class="event-fields">
+                    <label>Event name<input name="name" required placeholder="Your next big event"></label>
+                    <label>Description<textarea name="description" rows="4" placeholder="You can add details about the event and why people should attend. The description will appear on the event poster and will be formatted for each platform."></textarea></label>
+                    <label>Template<select name="template" id="template"></select></label>
+                    <p class="subtitle" id="template-hint"></p>
+                    <fieldset>
+                        <legend>Poster design</legend>
+                        <div id="poster-picker" class="poster-picker"></div>
+                    </fieldset>
 
-            <fieldset>
-                <legend>Post on</legend>
-                <div id="channel-checks"></div>
-            </fieldset>
+                    <div id="template-fields" class="grid grid-3"></div>
 
-            <label>Hashtags (comma separated)<input name="tags" placeholder="event, community, 2027"></label>
+                    <fieldset>
+                        <legend>Post on</legend>
+                        <div id="channel-checks"></div>
+                    </fieldset>
 
-            <br>
-            <button type="submit" class="btn btn-green" id="submit-btn">Create and schedule everything</button>
+                    <label>Hashtags (comma separated)<input name="tags" placeholder="event, community, 2027"></label>
+
+                    <br>
+                    <button type="submit" class="btn btn-green" id="submit-btn">Create and schedule everything</button>
+                </div>
+            </div>
         </form>
 
         <div id="results" class="card" hidden></div>

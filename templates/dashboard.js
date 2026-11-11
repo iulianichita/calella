@@ -2,8 +2,11 @@ const $ = id => document.getElementById(id);
 let data;
 let selectedEventId = null;
 let modalPosts = [];
+let modalPlatform = '';
 let modalIndex = 0;
 let modalListenersBound = false;
+let editEventState = null;
+let modalEditMode = false;
 
 const nav = document.querySelector('.nav');
 
@@ -14,6 +17,15 @@ function syncNavState() {
 
 window.addEventListener('scroll', syncNavState, { passive: true });
 syncNavState();
+
+const modalEditToggle = $('event-modal-edit-toggle');
+modalEditToggle?.addEventListener('click', () => {
+    if (!editEventState) return;
+    modalEditMode = !modalEditMode;
+    if (modalEditMode) renderEditPanel();
+    else renderModalSlide();
+    syncModalEditorVisibility();
+});
 
 function escapeHtml(value) {
     return String(value || '')
@@ -30,10 +42,94 @@ function serviceName(service) {
     return service.charAt(0).toUpperCase() + service.slice(1);
 }
 
+function getPostKey(post) {
+    if (!post) return '';
+    return String(post.id || post._id || `${post.channelService || 'unknown'}-${post.channelName || 'channel'}-${post.title || 'untitled'}-${post.dueAt || ''}`);
+}
+
+function syncModalEditorVisibility() {
+    const body = $('event-modal-body');
+    const editor = $('event-modal-editor');
+    const toggle = $('event-modal-edit-toggle');
+
+    if (body) body.hidden = modalEditMode;
+    if (editor) editor.hidden = !modalEditMode;
+    if (toggle) {
+        toggle.textContent = modalEditMode ? 'Preview' : 'Edit';
+        toggle.setAttribute('aria-pressed', String(modalEditMode));
+    }
+}
+
 function closeEventModal() {
     $('event-modal').hidden = true;
     modalPosts = [];
+    modalPlatform = '';
     modalIndex = 0;
+    modalEditMode = false;
+    editEventState = null;
+    document.body.style.overflow = '';
+    syncModalEditorVisibility();
+}
+
+function getGroupedModalPosts(posts = modalPosts) {
+    const grouped = new Map();
+
+    for (const post of posts) {
+        const service = (post?.channelService || 'unknown').toLowerCase();
+        if (!grouped.has(service)) {
+            grouped.set(service, {
+                key: service,
+                label: serviceName(post?.channelService || service),
+                posts: []
+            });
+        }
+        grouped.get(service).posts.push(post);
+    }
+
+    return [...grouped.values()];
+}
+
+function renderPlatformTabs() {
+    const container = $('event-modal-platforms');
+    const groups = getGroupedModalPosts(editEventState?.posts || modalPosts);
+
+    if (!container || !groups.length) {
+        if (container) container.innerHTML = '';
+        return;
+    }
+
+    const active = groups.some(group => group.key === modalPlatform) ? modalPlatform : groups[0].key;
+    modalPlatform = active;
+
+    container.innerHTML = groups.map(group => `
+        <button
+            type="button"
+            class="event-modal-platform ${group.key === active ? 'active' : ''}"
+            data-platform="${group.key}"
+            aria-pressed="${group.key === active ? 'true' : 'false'}"
+        >${group.label}</button>
+    `).join('');
+
+    container.querySelectorAll('[data-platform]').forEach(button => {
+        button.addEventListener('click', () => {
+            modalPlatform = button.dataset.platform;
+            modalIndex = 0;
+            renderPlatformTabs();
+            renderModalSlide();
+        });
+    });
+}
+
+function updateCaptionForCurrentPost(value) {
+    if (!editEventState?.posts?.length) return;
+    const groups = getGroupedModalPosts(editEventState.posts);
+    const activeGroup = groups.find(group => group.key === modalPlatform) || groups[0];
+    if (!activeGroup) return;
+    const post = activeGroup.posts[modalIndex] || activeGroup.posts[0];
+    if (!post) return;
+    const key = getPostKey(post);
+    const target = editEventState.posts.find(item => getPostKey(item) === key);
+    if (target) target.text = value;
 }
 
 function renderModalSlide() {
@@ -41,7 +137,29 @@ function renderModalSlide() {
     const counter = $('event-modal-counter');
     const prev = $('modal-prev');
     const next = $('modal-next');
-    const post = modalPosts[modalIndex];
+    const groups = getGroupedModalPosts(editEventState?.posts || modalPosts);
+
+    if (modalEditMode) {
+        if (slide) slide.innerHTML = '';
+        if (counter) counter.textContent = '';
+        if (prev) prev.disabled = true;
+        if (next) next.disabled = true;
+        return;
+    }
+
+    if (!groups.length) {
+        slide.innerHTML = '<p class="subtitle">No post details available.</p>';
+        counter.textContent = '';
+        prev.disabled = true;
+        next.disabled = true;
+        return;
+    }
+
+    const activeGroup = groups.find(group => group.key === modalPlatform) || groups[0];
+    modalPlatform = activeGroup.key;
+
+    const posts = activeGroup.posts;
+    const post = posts[modalIndex] || posts[0];
 
     if (!post) {
         slide.innerHTML = '<p class="subtitle">No post details available.</p>';
@@ -52,34 +170,336 @@ function renderModalSlide() {
     }
 
     const channel = escapeHtml(post.channelName || 'Unknown channel');
-    const service = escapeHtml(post.channelService || '').toLowerCase();
+    const service = (post.channelService || '').toLowerCase();
     const due = post.dueAt ? new Date(post.dueAt).toLocaleDateString('en-GB') : 'No date';
+    const imageMarkup = post.imageUrl
+        ? `<img class="platform-preview-image" src="${escapeHtml(post.imageUrl)}" alt="${escapeHtml(post.title || 'Post preview image')}">`
+        : '<div class="platform-preview-image placeholder">No image</div>';
+    const textareaValue = String(post.text || '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
 
-    counter.textContent = `Post ${modalIndex + 1} of ${modalPosts.length}`;
+    counter.textContent = `${activeGroup.label} · Post ${modalIndex + 1} of ${posts.length}`;
     prev.disabled = modalIndex <= 0;
-    next.disabled = modalIndex >= modalPosts.length - 1;
+    next.disabled = modalIndex >= posts.length - 1;
 
     slide.innerHTML = `
-        <article class="platform-preview platform-${service || 'generic'}">
-            <header class="platform-preview-head">
-                <span>${serviceName(service)}</span>
-                <span>${channel}</span>
-            </header>
-            <div class="platform-preview-body">
-                ${post.imageUrl ? `<img class="platform-preview-image" src="${escapeHtml(post.imageUrl)}" alt="Post preview image">` : '<div class="platform-preview-image"></div>'}
-                <h4 class="platform-preview-title">${escapeHtml(post.title || 'Untitled post')}</h4>
-                <p class="platform-preview-meta">${due} · ${escapeHtml(post.status || 'unknown')}</p>
+        <article class="platform-post-card platform-${service || 'generic'}">
+            <div class="platform-post-visual">
+                ${imageMarkup}
+            </div>
+            <div class="platform-post-content">
+                <div class="platform-post-meta">
+                    <span>${escapeHtml(activeGroup.label)}</span>
+                    <span>${channel}</span>
+                </div>
+                <h4>${escapeHtml(post.title || 'Untitled post')}</h4>
+                <label class="platform-post-caption-label">Caption</label>
+                <textarea class="platform-post-caption-input" data-post-key="${escapeHtml(getPostKey(post))}">${textareaValue}</textarea>
+                <div class="platform-post-foot">
+                    <span>${due}</span>
+                    <span>${escapeHtml(post.status || 'unknown')}</span>
+                </div>
             </div>
         </article>
     `;
+
+    const captionInput = slide.querySelector('.platform-post-caption-input');
+    if (captionInput) {
+        captionInput.addEventListener('input', e => {
+            const target = (editEventState?.posts || []).find(item => getPostKey(item) === e.target.dataset.postKey);
+            if (target) target.text = e.target.value;
+        });
+    }
+
+    renderPlatformTabs();
 }
 
-function openEventModal(eventObj) {
-    modalPosts = Array.isArray(eventObj?.postDetails) ? eventObj.postDetails : [];
+function backToPreview() {
+    modalEditMode = false;
     modalIndex = 0;
-    $('event-modal-title').textContent = `${eventObj.name} posts`;
-    $('event-modal').hidden = false;
+    const nextGroups = getGroupedModalPosts(editEventState.posts);
+    modalPlatform = nextGroups[0]?.key || '';
+    renderPlatformTabs();
     renderModalSlide();
+    renderEditPanel(); 
+    syncModalEditorVisibility();
+}
+
+function renderEditPanel() {
+    const form = $('event-edit-form');
+    if (!form || !editEventState) return;
+
+    const templates = Object.entries(data.templates || {});
+    const posterOptions = Object.entries(data.posters || {});
+    const templateKey = (editEventState.template && data.templates[editEventState.template]) ? editEventState.template : templates[0]?.[0] || '';
+    const selectedPoster = editEventState.poster || '';
+    const tpl = data.templates[templateKey] || { kind: 'single-stage' };
+    editEventState.template = templateKey;
+
+    let templateFieldsMarkup = '';
+    if (tpl.kind === 'single-stage') {
+            const postTitles = (editEventState.posts || []).map(p => p.title);
+            const hasAnnouncePost = postTitles.includes('Event announcement');
+            const hasThankYouPost = postTitles.includes('Thank you');
+
+            const announceEnabled = hasAnnouncePost;
+            const thankYouEnabled = hasThankYouPost;
+
+            const announceMarkup = hasAnnouncePost ? `
+                <div class="conditional-row">
+                    <label class="checkbox-label">
+                        <input type="checkbox" name="edit_announceEnabled" checked>
+                        <span>Publish announcement</span>
+                    </label>
+                    <div class="conditional-reveal">
+                        <label>Announcement date
+                            <input type="date" name="edit_announceDate" value="${editEventState.options?.announceDate || ''}">
+                        </label>
+                    </div>
+                </div>
+            ` : '';
+
+            const thankYouMarkup = hasThankYouPost ? `
+                <div class="conditional-row">
+                    <label class="checkbox-label">
+                        <input type="checkbox" name="edit_thankYouEnabled" checked>
+                        <span>Publish thank-you post</span>
+                    </label>
+                    <div class="conditional-reveal">
+                        <label>Thank-you date
+                            <input type="date" name="edit_thankYouDate" value="${editEventState.options?.thankYouDate || ''}">
+                        </label>
+                        <label>Thank-you caption
+                            <textarea name="edit_thankYouText">${escapeHtml(editEventState.options?.thankYouText || '')}</textarea>
+                        </label>
+                    </div>
+                </div>
+            ` : '';
+
+            templateFieldsMarkup = `
+                <label>Event day
+                    <input type="date" name="edit_eventDay" value="${editEventState.dates?.eventDay || ''}" required>
+                </label>
+                ${announceMarkup}
+                ${thankYouMarkup}
+            `;
+        } else if (tpl.kind === 'multiple-stages') {
+        const stages = Array.isArray(editEventState.options?.stages) && editEventState.options.stages.length ? editEventState.options.stages : [{ name: '', date: '' }, { name: '', date: '' }];
+        templateFieldsMarkup = `
+            <div class="event-edit-row">
+                <strong>Stages</strong>
+                <button type="button" class="btn btn-small" id="edit-stage-add">Add stage</button>
+            </div>
+            <div id="edit-stages-list">
+                ${stages.map((stage, index) => `
+                    <div class="conditional-row" data-edit-stage-row="${index}">
+                        <label>Stage name
+                            <input type="text" name="edit_stage_name_${index}" value="${escapeHtml(stage.name || '')}">
+                        </label>
+                        <label>Stage day
+                            <input type="date" name="edit_stage_date_${index}" value="${stage.date || ''}">
+                        </label>
+                        <button type="button" class="btn btn-small" data-edit-stage-remove="${index}">Remove</button>
+                    </div>
+                `).join('')}
+            </div>
+        `;
+    }
+
+    form.innerHTML = `
+            <label>Event title
+                <input type="text" name="edit_name" value="${escapeHtml(editEventState.name || '')}" required>
+            </label>
+            <label>Poster description (captions will be auto-generated)
+                <textarea name="edit_description" rows="4">${escapeHtml(editEventState.description || '')}</textarea>
+            </label>
+            <fieldset>
+                <legend>Poster design</legend>
+                <div class="poster-picker">
+                    <label class="poster-opt">
+                        <input type="radio" name="edit_poster" value="" ${selectedPoster === '' ? 'checked' : ''}>
+                        <div class="poster-none">None</div>
+                        <span>Text only</span>
+                    </label>
+                    ${posterOptions.map(([k, p]) => `
+                        <label class="poster-opt">
+                            <input type="radio" name="edit_poster" value="${k}" ${selectedPoster === k ? 'checked' : ''}>
+                            <img src="${p.url}" alt="${escapeHtml(p.name)}">
+                            <span>${escapeHtml(p.name)}</span>
+                        </label>
+                    `).join('')}
+                </div>
+            </fieldset>
+            ${templateFieldsMarkup}
+            <div class="event-edit-actions">
+                <button type="button" class="btn btn-small" id="delete-platform-posts">Delete all posts on this platform</button>
+                <button type="button" class="btn btn-small" id="delete-current-post">Delete this post</button>
+                <button type="submit" class="btn btn-small">Save changes</button>
+            </div>
+        `;
+
+    const templateInput = form.querySelector('[name="edit_template"]');
+    templateInput?.addEventListener('change', e => {
+        editEventState.template = e.target.value;
+        renderEditPanel();
+    });
+
+    const addStageBtn = form.querySelector('#edit-stage-add');
+    addStageBtn?.addEventListener('click', () => {
+        const stageList = form.querySelector('#edit-stages-list');
+        if (!stageList) return;
+        const index = stageList.querySelectorAll('[data-edit-stage-row]').length;
+        stageList.insertAdjacentHTML('beforeend', `
+            <div class="conditional-row" data-edit-stage-row="${index}">
+                <label>Stage name
+                    <input type="text" name="edit_stage_name_${index}" value="">
+                </label>
+                <label>Stage day
+                    <input type="date" name="edit_stage_date_${index}" value="">
+                </label>
+                <button type="button" class="btn btn-small" data-edit-stage-remove="${index}">Remove</button>
+            </div>
+        `);
+        stageList.querySelectorAll('[data-edit-stage-remove]').forEach(button => {
+            button.addEventListener('click', () => {
+                const row = button.closest('[data-edit-stage-row]');
+                if (row) row.remove();
+            });
+        });
+    });
+
+    form.querySelectorAll('[data-edit-stage-remove]').forEach(button => {
+        button.addEventListener('click', () => {
+            const row = button.closest('[data-edit-stage-row]');
+            if (row) row.remove();
+        });
+    });
+
+    form.querySelector('#delete-current-post')?.addEventListener('click', () => {
+        const groups = getGroupedModalPosts(editEventState.posts);
+        const activeGroup = groups.find(group => group.key === modalPlatform) || groups[0];
+        if (!activeGroup?.posts?.length) return;
+        const current = activeGroup.posts[modalIndex] || activeGroup.posts[0];
+        const key = getPostKey(current);
+        editEventState.posts = editEventState.posts.filter(item => getPostKey(item) !== key);
+        modalIndex = 0;
+        const nextGroups = getGroupedModalPosts(editEventState.posts);
+        modalPlatform = nextGroups[0]?.key || '';
+        
+        backToPreview();
+    });
+
+    form.querySelector('#delete-platform-posts')?.addEventListener('click', () => {
+        const platform = modalPlatform;
+        editEventState.posts = (editEventState.posts || []).filter(post => (post.channelService || '').toLowerCase() !== platform);
+        modalIndex = 0;
+        const nextGroups = getGroupedModalPosts(editEventState.posts);
+        modalPlatform = nextGroups[0]?.key || '';
+
+        backToPreview();
+    });
+
+    form.addEventListener('submit', async e => {
+        e.preventDefault();
+        const formData = new FormData(e.target);
+        const result = {
+            name: String(formData.get('edit_name') || '').trim(),
+            description: String(formData.get('edit_description') || '').trim(),
+            poster: String(formData.get('edit_poster') || ''),
+            template: String(formData.get('edit_template') || editEventState.template),
+            dates: {},
+            options: {},
+            posts: (editEventState.posts || []).map(post => ({
+                id: post.id || post._id,
+                title: post.title,
+                text: post.text,
+                channelId: post.channelId,
+                channelName: post.channelName,
+                channelService: post.channelService,
+                dueAt: post.title === "Event day" ? formData.get('edit_eventDay') : post.dueAt,
+                imageUrl: post.imageUrl,
+                status: post.status
+            }))
+        };
+
+        const tpl = data.templates[result.template] || { kind: 'single-stage' };
+
+        if (tpl.kind === 'single-stage') {
+            result.dates.eventDay = formData.get('edit_eventDay') || '';
+            result.options.announceEnabled = !!formData.get('edit_announceEnabled');
+            result.options.announceDate = formData.get('edit_announceDate') || '';
+            result.options.thankYouEnabled = !!formData.get('edit_thankYouEnabled');
+            result.options.thankYouDate = formData.get('edit_thankYouDate') || '';
+            result.options.thankYouText = String(formData.get('edit_thankYouText') || '');
+        } else if (tpl.kind === 'multiple-stages') {
+            const stages = [];
+            const stageCount = form.querySelectorAll('[data-edit-stage-row]').length || 0;
+            for (let i = 0; i < stageCount; i++) {
+                const stageName = String(formData.get(`edit_stage_name_${i}`) || '').trim();
+                const stageDate = String(formData.get(`edit_stage_date_${i}`) || '').trim();
+                if (stageName || stageDate) stages.push({ name: stageName, date: stageDate });
+            }
+            result.options.stages = stages;
+        }
+
+        if (!result.name) {
+            alert('Please add an event title.');
+            return;
+        }
+
+        const saveResult = await fetch(`/api/events/${encodeURIComponent(selectedEventId)}`, {
+            method: 'PUT',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(result)
+        });
+
+        const body = await saveResult.json().catch(() => ({}));
+        if (!saveResult.ok) {
+            alert(body.error || 'Could not save changes.');
+            return;
+        }
+
+        modalEditMode = false;
+        const details = await loadEventDetails(selectedEventId);
+        editEventState = details;
+        modalPosts = Array.isArray(details.posts) ? details.posts.filter(Boolean) : [];
+        modalPlatform = getGroupedModalPosts(modalPosts)[0]?.key || '';
+        modalIndex = 0;
+        $('event-modal-title').textContent = details.name;
+        renderPlatformTabs();
+        renderModalSlide();
+        renderEditPanel();
+        syncModalEditorVisibility();
+        init();
+    });
+}
+
+async function loadEventDetails(eventId) {
+    const res = await fetch(`/api/events/${encodeURIComponent(eventId)}`);
+    if (!res.ok) throw new Error('Could not load event details');
+    return res.json();
+}
+
+async function openEventModal(eventObj) {
+    try {
+        const details = await loadEventDetails(eventObj.id);
+        editEventState = details;
+        modalPosts = Array.isArray(details.posts) ? details.posts.filter(Boolean) : [];
+        const groups = getGroupedModalPosts(modalPosts);
+        modalPlatform = groups[0]?.key || '';
+        modalIndex = 0;
+        modalEditMode = false;
+        $('event-modal-title').textContent = details.name || eventObj.name;
+        $('event-modal').hidden = false;
+        renderPlatformTabs();
+        renderModalSlide();
+        renderEditPanel();
+        syncModalEditorVisibility();
+
+        document.body.style.overflow = 'hidden'; //no scroll
+    } catch (err) {
+        console.error(err);
+        alert(err.message || 'Could not open event details.');
+    }
 }
 
 async function init() {
@@ -87,8 +507,8 @@ async function init() {
     if (!r.ok) return (location.href = '/home');
     data = await r.json();
 
-    const name = data.email.split('@')[0];
-    // const name = data.name;
+    // const name = data.email.split('@')[0];
+    const name = data.name;
     $('greeting').textContent = `Hello, ${name}!`;
     $('today').textContent = new Date().toLocaleDateString('en-GB', { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric' });
 
@@ -152,6 +572,8 @@ async function init() {
 
         if (hasInstagram && selectedPoster === "") {
             submitBtn.disabled = true;
+            submitBtn.style.cursor = 'inherit';
+            msgContainer.style.marginTop = '3px';
             msgContainer.textContent = 'Posting to Instagram is not possible without a template.';
         } else {
             submitBtn.disabled = false;
@@ -177,7 +599,8 @@ async function init() {
     checkInstagramChannels();
 
     $('poster-picker').addEventListener('change', updatePreview);
-    $('event-form').elements['name', 'description'].addEventListener('input', updatePreview);
+    $('event-form').elements['name'].addEventListener('input', updatePreview);
+    $('event-form').elements['description'].addEventListener('input', updatePreview);
     $('template-fields').addEventListener('input', updatePreview);
     $('template-fields').addEventListener('change', updatePreview);
 
@@ -429,7 +852,7 @@ async function init() {
                     template: f.template.value,
                     dates: payload.dates,
                     options: payload.options,
-                    channelIds: [...document.querySelectorAll('#channel-checks input:checked')].map(i => i.value),
+                    channels: [...document.querySelectorAll('#channel-checks input:checked')].map(i => i.value),
                     tags: f.tags.value.split(',').map(t => t.trim()).filter(Boolean),
                     poster: f.querySelector('input[name="poster"]:checked')?.value || '',
                 })
@@ -469,7 +892,13 @@ function updatePreview() {
     previewTimer = setTimeout(() => {
         const poster = document.querySelector('input[name="poster"]:checked')?.value;
         const box = $('poster-preview');
-        if (!poster) { box.hidden = true; return; }
+        const emptyMsg = $('poster-preview-empty');
+        if (!poster) {
+            box.hidden = true;
+            emptyMsg.hidden = false;
+            return;
+        }
+        emptyMsg.hidden = true;
 
         const tpl = data?.templates?.[$('template').value];
         let headline = 'Event update';

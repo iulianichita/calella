@@ -15,6 +15,14 @@ module.exports = {
             const eventDay = event.dates.eventDay;
             const posts = [];
 
+            let desc = String(event.description || '').trim();
+            if (desc.length > 0) {
+                desc = desc.charAt(0).toUpperCase() + desc.slice(1);
+                if (!/[.!?]$/.test(desc)) {
+                    desc += '.';
+                }
+            }
+
             if (event.options?.announceEnabled && event.options?.announceDate) {
                 posts.push({
                     title: 'Event announcement',
