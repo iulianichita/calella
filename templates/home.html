@@ -196,7 +196,7 @@
         <div class="container">
         <h2>Ready to plan your next campaign?</h2>
         <p class="subtitle">Set your dates once and let <i>calella</i> handle the rest.</p>
-        <a href="/dashboard" class="btn btn-green" data-connected="Open Dashboard">Get Started</a>
+        <a href="/auth/buffer" class="btn btn-green js-buffer-btn" data-connected="Open Dashboard">Get Started</a>
         </div>
     </section>
 
@@ -220,9 +220,10 @@
         fetch('/api/buffer/status').then(r => r.json()).then(({ connected }) => {
             if (!connected) return;
             document.querySelectorAll('.js-buffer-btn').forEach(b => {
-            b.href = 'dashboard.html';
+            b.href = '/profile';
             b.textContent = b.dataset.connected;
-            });
+            }
+            )
         });
     </script>
 
