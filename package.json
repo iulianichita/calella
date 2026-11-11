@@ -21,6 +21,7 @@
   },
   "homepage": "https://github.com/iulianichita/calella#readme",
   "dependencies": {
+    "@google/genai": "^3.1.0",
     "@napi-rs/canvas": "^1.1.0",
     "connect-mongo": "^6.0.0",
     "dotenv": "^18.0.9",
