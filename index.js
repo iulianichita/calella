@@ -143,15 +143,70 @@ async function buffer(req, query) {
     return json.data;
 }
 
+//helpers
+async function createBufferPost(req, { text, channelId, service, dueAt, imageUrl }) {
+    const data = await buffer(req, `
+        mutation {
+            createPost(
+                input: {
+                    text: ${JSON.stringify(text)},
+                    channelId: ${JSON.stringify(channelId)},
+                    schedulingType: automatic,
+                    mode: customScheduled,
+                    dueAt: ${JSON.stringify(new Date(dueAt).toISOString())}
+                    ${service === 'instagram' ? ', metadata: { instagram: { type: post, shouldShareToFeed: true } }' : ''}
+                    ${imageUrl ? `, assets: [{ image: { url: ${JSON.stringify(imageUrl)} } }]` : ''}
+                }
+            ) {
+                ... on PostActionSuccess { post { id dueAt } }
+                ... on MutationError { message }
+            }
+        }
+    `);
+    const r = data.createPost;
+    return { id: r.post?.id || null, error: r.post ? null : r.message };
+}
+
+async function deleteBufferPost(req, id) {
+    if (!id || String(id) === '1') return;
+    try {
+        const data = await buffer(req, `
+            mutation {
+                deletePost(input: { id: ${JSON.stringify(String(id))} }) {
+                    __typename
+                    ... on VoidMutationError { message }
+                }
+            }
+        `);
+        if (data.deletePost.message) throw new Error(data.deletePost.message);
+    } catch (e) {
+        if (e.status === 401) throw e; // sesiune expirata: oprim tot
+        console.warn('Buffer delete failed for', id, '-', e.message);
+    }
+}
+
 app.get('/api/me', async (req, res) => {
     try {
-        const { account } = await buffer(req, '{ account { id email name organizations { id name } } }');
-        const org = account.organizations[0];
-        const { channels } = await buffer(req,
-            `{ channels(input: { organizationId: ${JSON.stringify(org.id)} }) { id name service } }`);
-        req.session.channels = channels;
+        // const { account } = await buffer(req, '{ account { id email name organizations { id name } } }');
+        // const org = account.organizations[0];
+        // const { channels } = await buffer(req,
+        //     `{ channels(input: { organizationId: ${JSON.stringify(org.id)} }) { id name service } }`);
+        const CACHE_MS = 5 * 60 * 1000;
+        let cache = req.session.meCache;
 
+        if (!cache || Date.now() - cache.at > CACHE_MS) {
+            const { account } = await buffer(req, '{ account { id email name organizations { id name } } }');
+            const org = account.organizations[0];
+            const { channels } = await buffer(req,
+                `{ channels(input: { organizationId: ${JSON.stringify(org.id)} }) { id name service } }`);
+            cache = { at: Date.now(), account, channels };
+            req.session.meCache = cache;
+        }
+
+        const { account, channels } = cache;
+        req.session.channels = channels;
         req.session.userId = account.id;
+
         const events = await Event.find({ userId: account.id }).sort({ createdAt: -1 });
         // console.log(account);
 
@@ -246,7 +301,9 @@ app.put('/api/events/:id', async (req, res) => {
             return res.status(400).json({ error: 'Unknown event template' });
         }
         const templateName = eventTemplates[template].name;
+        const templateKind = eventTemplates[template].kind || 'legacy';
 
+        // to do
         // const base = process.env.PUBLIC_BASE_URL || `${req.protocol}://${req.get('host')}`;
         const base = `${req.protocol}://${req.get('host')}`;
         const fmtDate = d => new Date(d).toLocaleDateString('en-GB', { day: 'numeric', month: 'long' });
@@ -277,6 +334,9 @@ app.put('/api/events/:id', async (req, res) => {
             const captions = rawText !== null
                 ? generateCaptionsForPlatforms(name, rawText, event.tags)
                 : null;
+            const posterDescription = (templateKind === 'single-stage' && post.title === 'Thank you')
+                ? ((options.thankYouText || '').trim() || description)
+                : description;
 
             return {
                 title: post.title || 'Untitled post',
@@ -286,17 +346,154 @@ app.put('/api/events/:id', async (req, res) => {
                 channelId: post.channelId || '',
                 channelName: post.channelName || '',
                 channelService: post.channelService || '',
-                dueAt: post.dueAt ? new Date(post.dueAt) : undefined,
+                dueAt: withPlatformPostingTime(post.dueAt, post.channelService),
                 imageUrl: poster ? `${base}/api/poster.png?${new URLSearchParams({
                     bg: poster,
                     eyebrow: finalName,
                     headline: post.title || '',
-                    description,
+                    description: posterDescription,
                     line: post.dueAt ? fmtDate(post.dueAt) : ''
                 })}` : '',
                 status: post.status || 'scheduled'
             }
         });
+
+        let finalPosts = nextPosts;
+
+        if (templateKind === 'single-stage') {
+            // canalele deja folosite in event (unice)
+            const eventChannels = [...new Map(
+                nextPosts.map(p => [String(p.channelId), p])
+            ).values()];
+
+            const createForAllChannels = (title, dateStr) => {
+                if (!dateStr || nextPosts.some(p => p.title === title)) return;
+
+                const rawText = textForTitle(title);
+                const captions = generateCaptionsForPlatforms(finalName, rawText, event.tags || []);
+                const posterDescription = title === 'Thank you'
+                    ? ((options.thankYouText || '').trim() || description)
+                    : description;
+
+                const imageUrl = poster ? `${base}/api/poster.png?${new URLSearchParams({
+                    bg: poster,
+                    eyebrow: finalName,
+                    headline: title,
+                    description: posterDescription,
+                    line: fmtDate(dateStr)
+                })}` : '';
+
+                for (const ch of eventChannels) {
+                    const service = (ch.channelService || '').toLowerCase();
+                    const due = withPlatformPostingTime(dateStr, ch.channelService);
+                    if (!due || due < new Date()) continue;
+                    if (service === 'instagram' && !imageUrl) continue;
+
+                    let text = captions[service]
+                        || (service === 'twitter' ? captions.x : null)
+                        || captions.facebook;
+                    if ((service === 'twitter' || service === 'x') && text.length > 280) {
+                        text = text.slice(0, 277) + '...';
+                    }
+
+                    nextPosts.push({
+                        title,
+                        text,
+                        channelId: ch.channelId,
+                        channelName: ch.channelName,
+                        channelService: ch.channelService,
+                        bufferPostId: 1,
+                        dueAt: due,
+                        imageUrl,
+                        status: 'scheduled'
+                    });
+                }
+            };
+
+            if (options.announceEnabled) createForAllChannels('Event announcement', options.announceDate);
+            if (options.thankYouEnabled) createForAllChannels('Thank you', options.thankYouDate);
+
+            // bifa scoasa => sterge postarile respective de pe toate platformele
+            finalPosts = nextPosts.filter(p =>
+                !(p.title === 'Event announcement' && !options.announceEnabled) &&
+                !(p.title === 'Thank you' && !options.thankYouEnabled)
+            );
+        }
+        if (templateKind === 'multiple-stages') {
+            const stages = options.stages || [];
+            const eventChannels = [...new Map(
+                nextPosts.map(p => [String(p.channelId), p])
+            ).values()];
+
+            const stagePosts = [];
+            for (const st of stages) {
+                const orig = st.origName || st.name;
+                const imageUrl = poster ? `${base}/api/poster.png?${new URLSearchParams({
+                    bg: poster,
+                    eyebrow: finalName,
+                    headline: st.name,
+                    description,
+                    line: fmtDate(st.date)
+                })}` : '';
+
+                for (const ch of eventChannels) {
+                    const service = (ch.channelService || '').toLowerCase();
+                    const due = withPlatformPostingTime(st.date, ch.channelService);
+                    const prev = nextPosts.find(p =>
+                        p.title === orig && String(p.channelId) === String(ch.channelId));
+
+                    if (prev) {
+                        // stage existent (posibil redenumit / mutat)
+                        stagePosts.push({ ...prev, title: st.name, dueAt: due || prev.dueAt, imageUrl });
+                        continue;
+                    }
+
+                    // stage nou => postare noua pe fiecare platforma
+                    if (!due || due < new Date()) continue;
+                    if (service === 'instagram' && !imageUrl) continue;
+
+                    const rawText = `${st.name} - ${finalName}, ${fmtShort(st.date)}. ${description}`.trim();
+                    const captions = generateCaptionsForPlatforms(finalName, rawText, event.tags || []);
+                    let text = captions[service]
+                        || (service === 'twitter' ? captions.x : null)
+                        || captions.facebook;
+                    if ((service === 'twitter' || service === 'x') && text.length > 280) {
+                        text = text.slice(0, 277) + '...';
+                    }
+
+                    stagePosts.push({
+                        title: st.name,
+                        text,
+                        channelId: ch.channelId,
+                        channelName: ch.channelName,
+                        channelService: ch.channelService,
+                        bufferPostId: 1,
+                        dueAt: due,
+                        imageUrl,
+                        status: 'scheduled'
+                    });
+                }
+            }
+            finalPosts = stagePosts;
+        }
+
+        // to do decomm
+        // // 1. sterge din Buffer postarile vechi
+        // for (const old of event.posts) await deleteBufferPost(req, old.bufferPostId);
+
+        // // 2. recreeaza-le cu datele noi
+        // for (const np of nextPosts) {
+        //     if (np.status !== 'scheduled' || !np.dueAt || np.dueAt < new Date()) continue;
+        //     const r = await createBufferPost(req, {
+        //         text: np.text,
+        //         channelId: np.channelId,
+        //         service: np.channelService.toLowerCase(),
+        //         dueAt: np.dueAt,
+        //         imageUrl: np.imageUrl
+        //     });
+        //     np.bufferPostId = r.id;
+        //     np.status = r.id ? 'scheduled' : r.error;
+        // }
 
         event.name = name || event.name;
         event.description = description;
@@ -304,7 +501,7 @@ app.put('/api/events/:id', async (req, res) => {
         event.poster = poster;
         event.dates = new Map(Object.entries(dates || {}));
         event.options = options || {};
-        event.posts = nextPosts;
+        event.posts = finalPosts;
 
         await event.save();
         // console.log(event);
@@ -325,6 +522,7 @@ app.delete('/api/events/:id', async (req, res) => {
         if (!event) return res.status(404).json({ error: 'Event not found' });
 
         // to do: apelul GraphQL catre API-ul Buffer
+        // for (const p of event.posts) await deleteBufferPost(req, p.bufferPostId);
 
         await event.deleteOne();
         res.json({ success: true, message: 'Event deleted successfully' });
@@ -347,6 +545,7 @@ app.delete('/api/events/:id/posts/:postId', async (req, res) => {
         if (!post) return res.status(404).json({ error: 'Post not found' });
 
         // to do: apelul GraphQL catre API-ul Buffer (sterge post.bufferPostId)
+        // await deleteBufferPost(req, post.bufferPostId);
 
         post.deleteOne();
         await event.save();
@@ -370,10 +569,161 @@ app.delete('/api/events/:id/platform/:service', async (req, res) => {
         const toDelete = event.posts.filter(p => (p.channelService || '').toLowerCase() === service);
 
         // to do: apelul GraphQL catre API-ul Buffer (sterge fiecare toDelete[i].bufferPostId)
+        // for (const p of toDelete) await deleteBufferPost(req, p.bufferPostId);
 
         event.posts = event.posts.filter(p => (p.channelService || '').toLowerCase() !== service);
         await event.save();
         res.json({ success: true, deleted: toDelete.length });
+    } catch (e) {
+        res.status(500).json({ error: e.message });
+    }
+});
+
+app.post('/api/events/:id/generate', async (req, res) => {
+    try {
+        if (!req.session.buffer || !req.session.userId) {
+            return res.status(401).json({ error: 'Not connected' });
+        }
+
+        const event = await Event.findOne({ _id: req.params.id, userId: req.session.userId });
+        if (!event) return res.status(404).json({ error: 'Event not found' });
+
+        const channelIds = (req.body?.channelIds || []).map(String);
+        const used = new Set(event.posts.map(p => String(p.channelId)));
+        const chans = (req.session.channels || [])
+            .filter(c => channelIds.includes(String(c.id)) && !used.has(String(c.id)));
+        if (!chans.length) return res.status(400).json({ error: 'No new channels selected' });
+
+        // datele evenimentului, ca in celelalte rute
+        const tplKey = Object.keys(eventTemplates).find(k => eventTemplates[k].name === event.template);
+        const t = eventTemplates[tplKey];
+        if (!t) return res.status(400).json({ error: 'Unknown event template' });
+
+        const name = event.name;
+        const description = event.description || '';
+        const tags = event.tags || [];
+        const poster = event.poster || '';
+        const dates = event.dates ? Object.fromEntries(event.dates.entries()) : {};
+        const options = event.options || {};
+
+        const templatePosts = typeof t.buildPosts === 'function'
+            ? t.buildPosts({ name, description, dates, options })
+            : t.posts;
+        const tplByTitle = new Map((templatePosts || []).map(p => [p.title, p]));
+
+        // to do
+        // const base = process.env.PUBLIC_BASE_URL || `${req.protocol}://${req.get('host')}`;
+        const base = `${req.protocol}://${req.get('host')}`;
+        const fmtDate = d => new Date(d).toLocaleDateString('en-GB', { day: 'numeric', month: 'long' });
+
+        // surse: cate una pentru fiecare (titlu + data), le folosim doar pentru titlu si data
+        const sources = new Map();
+        for (const p of event.posts) {
+            const key = `${p.title}|${toIsoDate(p.dueAt)}`;
+            if (!sources.has(key)) sources.set(key, p);
+        }
+        if (!sources.size) return res.status(400).json({ error: 'No existing posts to base on' });
+
+        const added = [];
+        const skipped = [];
+
+        try {
+            for (const src of sources.values()) {
+                const tp = tplByTitle.get(src.title);
+                const rawText = tp
+                    ? (typeof tp.text === 'function' ? tp.text({ name, description, dates }) : tp.text)
+                    : (src.text || '');
+                const captions = generateCaptionsForPlatforms(name, rawText, tags);
+
+                const posterDescription = (t.kind === 'single-stage' && src.title === 'Thank you')
+                    ? ((options.thankYouText || '').trim() || description)
+                    : description;
+
+                const imageUrl = poster ? `${base}/api/poster.png?${new URLSearchParams({
+                    bg: poster,
+                    eyebrow: name,
+                    headline: src.title,
+                    description: posterDescription,
+                    line: tp?.lineDate
+                        ? fmtDate(tp.lineDate)
+                        : (tp && tp.days <= 0 && dates[tp.at] ? fmtDate(dates[tp.at]) : '')
+                })}` : null;
+
+                for (const ch of chans) {
+                    const service = ch.service.toLowerCase();
+                    const due = withPlatformPostingTime(src.dueAt, ch.service);
+
+                    if (!due || Number.isNaN(due.getTime()) || due < new Date()) {
+                        skipped.push(`${src.title} (${ch.name}: date passed)`);
+                        continue;
+                    }
+                    if (service === 'instagram' && !imageUrl) {
+                        skipped.push(`${src.title} (${ch.name}: needs a poster)`);
+                        continue;
+                    }
+                    // to do
+                    // if (service === 'instagram' && /localhost|127\.0\.0\.1/i.test(imageUrl)) {
+                    //     skipped.push(`${src.title} (${ch.name}: image URL is not public)`);
+                    //     continue;
+                    // }
+
+                    let text = captions[service]
+                        || (service === 'twitter' ? captions.x : null)
+                        || captions.facebook;
+                    if ((service === 'twitter' || service === 'x') && text.length > 280) {
+                        text = text.slice(0, 277) + '...';
+                    }
+
+                    // to do
+                    // const r = await createBufferPost(req, {
+                    //     text,
+                    //     channelId: ch.id,
+                    //     service,
+                    //     dueAt: due,
+                    //     imageUrl
+                    // });
+
+                    // if (!r.id) {
+                    //     skipped.push(`${src.title} (${ch.name}: ${r.error || 'Buffer error'})`);
+                    //     continue;
+                    // }
+
+                    added.push({
+                        title: src.title,
+                        text,
+                        channelId: ch.id,
+                        channelName: ch.name,
+                        channelService: ch.service,
+                        // bufferPostId: r.id,
+                        bufferPostId: 1,
+                        dueAt: due,
+                        imageUrl: imageUrl || '',
+                        status: 'scheduled'
+                    });
+                }
+            }
+        } catch (err) {
+            if (added.length) {
+                event.posts.push(...added);
+                await event.save().catch(console.error);
+            }
+            return res.status(err.status || 500).json({
+                error: err.message,
+                added: added.length,
+                skipped
+            });
+        }
+
+        if (added.length) {
+            event.posts.push(...added);
+            event.channelIds = [...new Set([
+                ...(event.channelIds || []),
+                ...added.map(a => a.channelId)
+            ])];
+            await event.save();
+        }
+
+        res.json({ success: true, added: added.length, skipped });
     } catch (e) {
         res.status(500).json({ error: e.message });
     }
@@ -423,6 +773,34 @@ function generateCaptionsForPlatforms(eventName, rawPostText, tags) {
         instagram: `${rawPostText}\n\n${formattedTags} #event #community`,
         facebook: `We are happy to share updates about ${eventName}.\n\n${baseText}`
     };
+}
+
+const PLATFORM_POSTING_TIME_UTC = {
+    twitter: [14, 0],
+    x: [14, 0],
+    linkedin: [11, 30],
+    instagram: [18, 0],
+    facebook: [18, 0]
+};
+
+function toIsoDate(value) {
+    if (!value) return '';
+    if (typeof value === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(value)) return value;
+    const parsed = new Date(value);
+    if (Number.isNaN(parsed.getTime())) return '';
+    return parsed.toISOString().slice(0, 10);
+}
+
+function withPlatformPostingTime(dateLike, channelService) {
+    const datePart = toIsoDate(dateLike);
+    if (!datePart) return undefined;
+
+    const service = String(channelService || '').toLowerCase();
+    const [hour, minute] = PLATFORM_POSTING_TIME_UTC[service] || [12, 0];
+    const hh = String(hour).padStart(2, '0');
+    const mm = String(minute).padStart(2, '0');
+
+    return new Date(`${datePart}T${hh}:${mm}:00.000Z`);
 }
 
 app.post('/api/events', async (req, res) => {
@@ -479,16 +857,15 @@ app.post('/api/events', async (req, res) => {
             : t.posts;
 
         for (const p of templatePosts) {
-            const due = p.dueDate
-                ? new Date(`${p.dueDate}T10:00:00.000Z`)
-                : new Date(`${dates[p.at]}T10:00:00.000Z`);
-
-            if (!p.dueDate) {
-                due.setUTCDate(due.getUTCDate() + 30);
+            let baseDueDate = p.dueDate || dates[p.at] || '';
+            if (!p.dueDate && baseDueDate) {
+                const shifted = new Date(`${baseDueDate}T12:00:00.000Z`);
+                shifted.setUTCDate(shifted.getUTCDate() + 30);
+                baseDueDate = shifted.toISOString().slice(0, 10);
             }
 
-            if (isNaN(due) || due < new Date()) {
-                results.push({ title: p.title, status: 'skipped (date passed)' });
+            if (!baseDueDate) {
+                results.push({ title: p.title, status: 'skipped (missing date)' });
                 continue;
             }
 
@@ -498,37 +875,34 @@ app.post('/api/events', async (req, res) => {
             for (const ch of chans) {
                 const serviceKey = ch.service.toLowerCase();
                 let text = platformCaptions[serviceKey] || platformCaptions.facebook || rawPostText;
+                const due = withPlatformPostingTime(baseDueDate, ch.service);
+                if (!due || Number.isNaN(due.getTime()) || due < new Date()) {
+                    results.push({ title: p.title, channel: ch.name, status: 'skipped (date passed)' });
+                    continue;
+                }
+                const posterDescription = (t.kind === 'single-stage' && p.title === 'Thank you')
+                    ? ((options.thankYouText || '').trim() || description)
+                    : description;
 
                 const imageUrl = poster ? `${base}/api/poster.png?${new URLSearchParams({
                     bg: poster,
                     eyebrow: name,
                     headline: p.title,
-                    description: description,
+                    description: posterDescription,
                     line: p.lineDate ? fmtDate(p.lineDate) : (p.days <= 0 ? fmtDate(dates[p.at]) : '')
                 })}` : null;
 
-                // const data = await buffer(req, `
-                //     mutation { 
-                //         createPost(
-                //             input: {
-                //                 text: ${JSON.stringify(text)}, 
-                //                 channelId: ${JSON.stringify(ch.id)},
-                //                 schedulingType: automatic, 
-                //                 mode: customScheduled, 
-                //                 dueAt: ${JSON.stringify(due.toISOString())}
-                //                 ${ch.service === 'instagram' ? ', metadata: { instagram: { type: post, shouldShareToFeed: true } }' : ''}
-                //                 ${imageUrl ? `, assets: [{ image: { url: ${JSON.stringify(imageUrl)} } }]` : ''}
-                //             }
-                //         ) {
-                //             ... on PostActionSuccess { 
-                //                 post { id dueAt } 
-                //             } 
-                //             ... on MutationError { message } 
-                //         } 
-                //     }
-                // `);
+                // to do - decomenteaza
+                // const r = await createBufferPost(req, {
+                //     text, channelId: ch.id, service: ch.service, dueAt: due, imageUrl
+                // });
 
-                // const r = data.createPost;
+                // results.push({
+                //     title: p.title, text, channel: ch.name, channelId: ch.id, channelService: ch.service,
+                //     bufferPostId: r.id,
+                //     dueAt: due, image: imageUrl,
+                //     status: r.id ? 'scheduled' : r.error
+                // });
 
                 results.push({ title: p.title, text, channel: ch.name, channelId: ch.id, channelService: ch.service, 
                     bufferPostId: 1,

@@ -15,8 +15,9 @@
 
 .dash { background: var(--gray-bg); }
 .dash-main { padding-top: 90px; padding-bottom: 80px; }
+.buffer-limits { margin-top: 10px; }
 .dash h1 { font-size: 34px; font-weight: 600; letter-spacing: -0.02em; }
-.dash h2 { font-size: 24px; margin: 48px 0 16px; }
+.dash h2 { font-size: 24px; margin: 45px 0 16px; }
 .stats { margin-top: 24px; }
 .stats h3 { font-size: 32px; }
 .chan { display: flex; align-items: center; gap: 12px; }
@@ -57,6 +58,10 @@
 .event-modal-arrow { width: 40px; height: 40px; border-radius: 50%; border: 1px solid var(--border); background: #fff; color: var(--black); cursor: pointer; font-size: 26px; line-height: 1; }
 .event-modal-arrow:disabled { opacity: .35; cursor: not-allowed; }
 .event-modal-slide { height: 100%; min-height: 250px; border-radius: 16px; background: linear-gradient(180deg,#fff,#f7f7f8); padding: 6px; display: flex; align-items: stretch; }
+.edit-unity-note {
+    font-size: smaller;
+    margin: 0 0 2px;
+}
 .platform-post-card { display: grid; grid-template-columns: minmax(250px, 0.8fr) minmax(220px, 1.2fr); gap: 16px; width: 100%; height: 100%; background: #fff; border: 1px solid #ececef; border-radius: 16px; padding: 16px; box-shadow: inset 0 0 0 1px rgba(255,255,255,.8); }
 .platform-post-visual { display: flex; align-items: center; justify-content: center; background: linear-gradient(180deg, #f5f5f7, #f0f0f3); border-radius: 12px; overflow: hidden; min-height: 220px; }
 .platform-preview-image { width: 100%; height: 100%; max-height: 100%; object-fit: cover; border-radius: 12px; }
@@ -138,7 +143,7 @@ a.disconnect-btn:hover {color: rgb(180, 23, 23);}
 .poster-none { display: grid; place-items: center; color: var(--gray-text); background: #fff; }
 .poster-opt input:checked + img, .poster-opt input:checked + .poster-none { border-color: var(--green); }
 .poster-opt span { color: var(--gray-text); font-weight: 500; }
-.poster-preview { width: 260px; max-width: 100%; margin-top: 16px; border-radius: 14px; border: 1px solid var(--border); }
+.poster-preview { width: 260px; max-width: 100%; margin-top: 0px; border-radius: 14px; border: 1px solid var(--border); }
 .res-img { width: 90px; border-radius: 8px; margin-top: 6px; }
 
 .form { display: flex; flex-direction: column; gap: 18px; }
@@ -164,6 +169,31 @@ a.disconnect-btn:hover {color: rgb(180, 23, 23);}
 #template-hint {font-size: smaller; margin-top: 0;}
 #template-fields {margin-top: 20px;}
 #poster-designs {margin-top: 8px;}
+
+.event-modal-generate {
+    padding: 10px 12px;
+    border: 1px solid var(--border);
+    border-radius: 14px;
+    background: var(--gray-bg);
+}
+.event-modal-generate[hidden] { display: none; }
+.event-modal-generate .gen-note { margin: 0 0 8px; font-size: 12px; color: var(--gray-text); }
+.event-modal-generate .gen-row { display: flex; align-items: center; justify-content: space-between; gap: 10px; flex-wrap: wrap; }
+.event-modal-generate #gen-channel-checks { display: flex; flex-wrap: wrap; gap: 6px; margin: 0; }
+
+.gen-chip {
+    position: relative; display: inline-flex; align-items: center; margin: 0;
+    padding: 6px 12px; border: 1px solid var(--border); border-radius: 999px;
+    background: #fff; color: var(--black); font-size: 12px; font-weight: 600;
+    cursor: pointer; transition: all .18s ease;
+}
+.gen-chip input[type="checkbox"] { position: absolute; opacity: 0; width: 0; height: 0; min-width: 0; border: 0; pointer-events: none; }
+.gen-chip small { margin-left: 5px; font-weight: 500; opacity: .7; }
+.gen-chip:has(input:checked) { background: var(--green); border-color: var(--green); color: #fff; }
+
+.event-modal-generate .btn { margin: 0; border: none; cursor: pointer; padding: 7px 14px; font-size: 12px; }
+.event-modal-generate .btn:disabled { opacity: .5; cursor: wait; }
+.event-modal-generate #gen-msg { margin: 6px 0 0; font-size: 12px; color: var(--gray-text); }
 
 .conditional-row {
     display: flex;
@@ -281,12 +311,12 @@ input[type="checkbox"]:checked::before {
     align-items: start; /* pentru sticky */
 }
 .event-side {
-    position: sticky;
+    /* position: sticky; */
     top: 70px;
 }
 .event-side h2 { margin-bottom: 16px; }
 .event-side .poster-preview {
-    width: 80%;
+    width: 100%;
     height: auto;
     display: block;
 }
@@ -296,6 +326,10 @@ input[type="checkbox"]:checked::before {
 .event-side .poster-preview[hidden],
 .event-side [hidden] {
     display: none;
+}
+#poster-preview-title{
+    margin-top: 10px;
+    font-size: 15px;
 }
 
 @media (max-width: 900px) {

@@ -65,7 +65,7 @@ module.exports = {
                 title: stage.name,
                 dueDate: stage.date,
                 lineDate: stage.date,
-                text: e => `Stage ${i + 1} (${stage.name}) of ${e.name} is happening today, ${fmt(stage.date)}.`
+                text: e => `${stage.name} of ${e.name} is happening today, ${fmt(stage.date)}.`
             }));
         }
     }
