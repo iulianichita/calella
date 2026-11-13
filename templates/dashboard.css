@@ -154,9 +154,30 @@ a.disconnect-btn:hover {color: rgb(180, 23, 23);}
 }
 .form input:focus, .form textarea:focus, .form select:focus { outline: 2px solid var(--green); border-color: transparent; }
 .form fieldset { border: none; }
-#channel-checks label { display: inline-flex; align-items: center; gap: 8px; margin: 8px 16px 0 0;
-    font-weight: 500; color: var(--black); }
-#channel-checks input { width: auto; margin: 0; }
+#channel-checks {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 8px 16px;
+    margin-top: 8px;
+}
+#channel-checks label {
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+    margin: 0;
+    font-weight: 500;
+    color: var(--black);
+}
+#post-on-field{
+    margin-top: 13px;
+}
+#tags-field{
+    margin-top: 13px;
+}
+/* #channel-checks label { display: inline-flex; align-items: center; gap: 8px; margin: 8px 16px 0 0;
+    font-weight: 500; color: var(--black); } */
+/* #channel-checks input { width: auto; margin: 0; } */
 .form .btn { align-self: flex-start; margin-top: 0; border: none; cursor: pointer; }
 .form .btn:disabled { opacity: .5; cursor: wait; }
 .form select {
@@ -231,7 +252,7 @@ input[type="checkbox"] {
     -webkit-appearance: none;
     width: 15px;
     height: 15px;
-    min-width: px;
+    min-width: 25px;
     margin: 0;
     border: 1.5px solid var(--border);
     border-radius: 6px;

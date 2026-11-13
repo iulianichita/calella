@@ -35,7 +35,7 @@
             <div class="card"><p class="label">Events</p><h3 id="stat-events">-</h3></div>
             <div class="card"><p class="label">Posts scheduled</p><h3 id="stat-posts">-</h3></div>
         </div>
-        <p class="subtitle buffer-limits">Please note that your active Buffer plan limits apply to this application.</p>
+        <p class="subtitle buffer-limits">Please note that your active Buffer plan limitations apply to this application.</p>
 
         <h2 id="channels">Your channels</h2>
         <div class="grid grid-3" id="channels-list"></div>
@@ -94,12 +94,14 @@
 
                     <div id="template-fields" class="grid grid-3"></div>
 
-                    <fieldset>
+                    <fieldset id="post-on-field">
                         <legend>Post on</legend>
                         <div id="channel-checks"></div>
                     </fieldset>
 
+                    <div id="tags-field">
                     <label>Hashtags (comma separated)<input name="tags" placeholder="event, community, 2027"></label>
+                    </div>
 
                     <br>
                     <button type="submit" class="btn btn-green" id="submit-btn">Create and schedule everything</button>
