@@ -21,6 +21,9 @@ try { GlobalFonts.registerFromPath(path.join(__dirname, 'fonts', 'Poster.ttf'), 
 const app = express();
 const PORT = process.env.PORT || 3000;
 
+// Optional: muta toate datele din sabloane cu N zile (util la teste). Implicit 0 = fara mutare.
+const DATE_SHIFT_DAYS = Number(process.env.DATE_SHIFT_DAYS || 0);
+
 app.set('trust proxy', 1);
 app.use(express.json());
 app.use(session({
@@ -75,7 +78,6 @@ app.get('/auth/buffer', (req, res) => {
 
 app.get('/auth/buffer/callback', async (req, res) => {
     const { code, state, error } = req.query;
-    // console.log('cookie primit:', !!req.headers.cookie, 'attempts:', req.session.oauthAttempts?.length, 'state primit:', state);
     if (error) return res.redirect('/home');
 
     const attempts = Array.isArray(req.session.oauthAttempts) ? req.session.oauthAttempts : [];
@@ -116,6 +118,29 @@ app.get('/api/buffer/status', (req, res) => {
 app.get('/auth/logout', (req, res) => {
     req.session.destroy(() => res.redirect('/home'));
 });
+
+// Verifica sesiunea INAINTE de orice modificare, ca sa nu ramanem la jumatate
+// (ex: postari vechi sterse din Buffer, dar token expirat la recreare).
+function requireBuffer(req, res, next) {
+    const b = req.session.buffer;
+    if (!b || !req.session.userId || Date.now() > b.expiresAt) {
+        return res.status(401).json({ error: 'Not connected' });
+    }
+    next();
+}
+
+const busyEvents = new Set();
+function lockEvent(req, res, next) {
+    const id = req.params.id;
+    if (busyEvents.has(id)) {
+        return res.status(409).json({ error: 'This event is being updated. Try again in a moment.' });
+    }
+    busyEvents.add(id);
+    const release = () => busyEvents.delete(id);
+    res.on('finish', release);
+    res.on('close', release);
+    next();
+}
 
 // apeluri catre buffer api
 async function buffer(req, query) {
@@ -164,11 +189,30 @@ async function createBufferPost(req, { text, channelId, service, dueAt, imageUrl
         }
     `);
     const r = data.createPost;
-    return { id: r.post?.id || null, error: r.post ? null : r.message };
+    return { id: r.post?.id || null, error: r.post ? null : (r.message || 'Buffer error') };
 }
 
+// o eroare la o postare nu opreste restul; doar 401 (sesiune) opreste tot
+async function safeCreateBufferPost(req, args) {
+    // descarca fundalul in cache inainte ca Buffer sa l ceara
+    if (args.imageUrl) await fetch(args.imageUrl, { signal: AbortSignal.timeout(20000) }).catch(() => {});
+
+    let last = { id: null, error: 'Buffer error' };
+    for (let i = 0; i < 2; i++) {
+        try {
+            last = await createBufferPost(req, args);
+            if (last.id) return last;
+        } catch (e) {
+            if (e.status === 401) throw e;
+            last = { id: null, error: e.message || 'Buffer error' };
+        }
+    }
+    return last;
+}
+
+// true = sters (sau nimic de sters), false = a esuat
 async function deleteBufferPost(req, id) {
-    if (!id || String(id) === '1') return;
+    if (!id || String(id) === '1') return true;
     try {
         const data = await buffer(req, `
             mutation {
@@ -179,18 +223,44 @@ async function deleteBufferPost(req, id) {
             }
         `);
         if (data.deletePost.message) throw new Error(data.deletePost.message);
+        return true;
     } catch (e) {
         if (e.status === 401) throw e; // sesiune expirata: oprim tot
         console.warn('Buffer delete failed for', id, '-', e.message);
+        return false;
     }
+}
+
+// Sterge din Buffer doar postarile viitoare (cele deja publicate nu mai pot fi sterse).
+// Returneaza numarul de stergeri esuate.
+async function deleteFromBuffer(req, posts) {
+    const now = new Date();
+    let failed = 0;
+    for (const p of posts) {
+        if (!p.bufferPostId || !p.dueAt || new Date(p.dueAt) <= now) continue;
+        if (!(await deleteBufferPost(req, p.bufferPostId))) failed++;
+    }
+    return failed;
+}
+
+// caption potrivit platformei; X are cheia "x" in captions, dar canalul vine ca "twitter"
+function pickCaption(captions, service) {
+    const s = String(service || '').toLowerCase();
+    let text = captions[s] || (s === 'twitter' ? captions.x : null) || captions.facebook;
+    if ((s === 'twitter' || s === 'x') && text.length > 280) text = text.slice(0, 277) + '...';
+    return text;
+}
+
+const isLocalUrl = u => /localhost|127\.0\.0\.1/i.test(String(u || ''));
+function instagramBlocker(service, imageUrl) {
+    if (String(service).toLowerCase() !== 'instagram') return null;
+    if (!imageUrl) return 'needs a poster';
+    if (isLocalUrl(imageUrl)) return 'image URL is not public';
+    return null;
 }
 
 app.get('/api/me', async (req, res) => {
     try {
-        // const { account } = await buffer(req, '{ account { id email name organizations { id name } } }');
-        // const org = account.organizations[0];
-        // const { channels } = await buffer(req,
-        //     `{ channels(input: { organizationId: ${JSON.stringify(org.id)} }) { id name service } }`);
         const CACHE_MS = 5 * 60 * 1000;
         let cache = req.session.meCache;
 
@@ -208,7 +278,6 @@ app.get('/api/me', async (req, res) => {
         req.session.userId = account.id;
 
         const events = await Event.find({ userId: account.id }).sort({ createdAt: -1 });
-        // console.log(account);
 
         res.json({
             name: account.name,
@@ -242,12 +311,8 @@ app.get('/api/me', async (req, res) => {
     } catch (e) { res.status(e.status || 500).json({ error: e.message }); }
 });
 
-app.get('/api/events/:id', async (req, res) => {
+app.get('/api/events/:id', requireBuffer, async (req, res) => {
     try {
-        if (!req.session.buffer || !req.session.userId) {
-            return res.status(401).json({ error: 'Not connected' });
-        }
-
         const event = await Event.findOne({ _id: req.params.id, userId: req.session.userId });
         if (!event) return res.status(404).json({ error: 'Event not found' });
 
@@ -278,12 +343,8 @@ app.get('/api/events/:id', async (req, res) => {
     }
 });
 
-app.put('/api/events/:id', async (req, res) => {
+app.put('/api/events/:id', requireBuffer, lockEvent, async (req, res) => {
     try {
-        if (!req.session.buffer || !req.session.userId) {
-            return res.status(401).json({ error: 'Not connected' });
-        }
-
         const event = await Event.findOne({ _id: req.params.id, userId: req.session.userId });
         if (!event) return res.status(404).json({ error: 'Event not found' });
 
@@ -303,24 +364,18 @@ app.put('/api/events/:id', async (req, res) => {
         const templateName = eventTemplates[template].name;
         const templateKind = eventTemplates[template].kind || 'legacy';
 
-        // to do
-        // const base = process.env.PUBLIC_BASE_URL || `${req.protocol}://${req.get('host')}`;
-        const base = `${req.protocol}://${req.get('host')}`;
+        const base = process.env.PUBLIC_BASE_URL || `${req.protocol}://${req.get('host')}`;
         const fmtDate = d => new Date(d).toLocaleDateString('en-GB', { day: 'numeric', month: 'long' });
+        const fmtShort = fmtDate;
         const finalName = name || event.name;
-        
-        // console.log(event);
-        // console.log(req.body);
-
-        // reface caption (text field)
-        const fmtShort = d => new Date(d).toLocaleDateString('en-GB', { day: 'numeric', month: 'long' });
+        const eventTags = event.tags || [];
 
         const textForTitle = title => {
             if (title === 'Event announcement') {
-                return `${name} is coming on ${fmtShort(dates.eventDay)}. ${description}`.trim();
+                return `${finalName} is coming on ${fmtShort(dates.eventDay)}. ${description}`.trim();
             }
             if (title === 'Event day') {
-                return `Today is the day: ${name}!`;
+                return `Today is the day: ${finalName}!`;
             }
             if (title === 'Thank you') {
                 return (options.thankYouText || '').trim() || `Thank you to everyone who joined ${finalName}.`;
@@ -330,23 +385,23 @@ app.put('/api/events/:id', async (req, res) => {
 
         const nextPosts = posts.map(post => {
             const rawText = textForTitle(post.title);
-            const serviceKey = (post.channelService || '').toLowerCase();
             const captions = rawText !== null
-                ? generateCaptionsForPlatforms(name, rawText, event.tags)
+                ? generateCaptionsForPlatforms(finalName, rawText, eventTags)
                 : null;
             const posterDescription = (templateKind === 'single-stage' && post.title === 'Thank you')
                 ? ((options.thankYouText || '').trim() || description)
                 : description;
+            const due = withPlatformPostingTime(post.dueAt, post.channelService);
 
             return {
                 title: post.title || 'Untitled post',
                 text: captions
-                    ? (captions[serviceKey] || captions.facebook)
+                    ? pickCaption(captions, post.channelService)
                     : (post.text ?? ''),
                 channelId: post.channelId || '',
                 channelName: post.channelName || '',
                 channelService: post.channelService || '',
-                dueAt: withPlatformPostingTime(post.dueAt, post.channelService),
+                dueAt: due,
                 imageUrl: poster ? `${base}/api/poster.png?${new URLSearchParams({
                     bg: poster,
                     eyebrow: finalName,
@@ -354,8 +409,9 @@ app.put('/api/events/:id', async (req, res) => {
                     description: posterDescription,
                     line: post.dueAt ? fmtDate(post.dueAt) : ''
                 })}` : '',
-                status: post.status || 'scheduled'
-            }
+                // postarile viitoare se resincronizeaza (si cele esuate se reincearca)
+                status: (due && due > new Date()) ? 'scheduled' : (post.status || 'scheduled')
+            };
         });
 
         let finalPosts = nextPosts;
@@ -370,7 +426,7 @@ app.put('/api/events/:id', async (req, res) => {
                 if (!dateStr || nextPosts.some(p => p.title === title)) return;
 
                 const rawText = textForTitle(title);
-                const captions = generateCaptionsForPlatforms(finalName, rawText, event.tags || []);
+                const captions = generateCaptionsForPlatforms(finalName, rawText, eventTags);
                 const posterDescription = title === 'Thank you'
                     ? ((options.thankYouText || '').trim() || description)
                     : description;
@@ -384,25 +440,16 @@ app.put('/api/events/:id', async (req, res) => {
                 })}` : '';
 
                 for (const ch of eventChannels) {
-                    const service = (ch.channelService || '').toLowerCase();
                     const due = withPlatformPostingTime(dateStr, ch.channelService);
                     if (!due || due < new Date()) continue;
-                    if (service === 'instagram' && !imageUrl) continue;
-
-                    let text = captions[service]
-                        || (service === 'twitter' ? captions.x : null)
-                        || captions.facebook;
-                    if ((service === 'twitter' || service === 'x') && text.length > 280) {
-                        text = text.slice(0, 277) + '...';
-                    }
 
                     nextPosts.push({
                         title,
-                        text,
+                        text: pickCaption(captions, ch.channelService),
                         channelId: ch.channelId,
                         channelName: ch.channelName,
                         channelService: ch.channelService,
-                        bufferPostId: 1,
+                        bufferPostId: null,
                         dueAt: due,
                         imageUrl,
                         status: 'scheduled'
@@ -414,6 +461,7 @@ app.put('/api/events/:id', async (req, res) => {
             if (options.thankYouEnabled) createForAllChannels('Thank you', options.thankYouDate);
 
             // bifa scoasa => sterge postarile respective de pe toate platformele
+            // (cele vechi se sterg din Buffer mai jos, pentru ca lipsesc din finalPosts)
             finalPosts = nextPosts.filter(p =>
                 !(p.title === 'Event announcement' && !options.announceEnabled) &&
                 !(p.title === 'Thank you' && !options.thankYouEnabled)
@@ -424,6 +472,11 @@ app.put('/api/events/:id', async (req, res) => {
             const eventChannels = [...new Map(
                 nextPosts.map(p => [String(p.channelId), p])
             ).values()];
+
+            const stageText = (st, service) => {
+                const raw = `${st.name} - ${finalName}, ${fmtShort(st.date)}. ${description}`.trim();
+                return pickCaption(generateCaptionsForPlatforms(finalName, raw, eventTags), service);
+            };
 
             const stagePosts = [];
             for (const st of stages) {
@@ -437,37 +490,34 @@ app.put('/api/events/:id', async (req, res) => {
                 })}` : '';
 
                 for (const ch of eventChannels) {
-                    const service = (ch.channelService || '').toLowerCase();
                     const due = withPlatformPostingTime(st.date, ch.channelService);
                     const prev = nextPosts.find(p =>
                         p.title === orig && String(p.channelId) === String(ch.channelId));
 
                     if (prev) {
-                        // stage existent (posibil redenumit / mutat)
-                        stagePosts.push({ ...prev, title: st.name, dueAt: due || prev.dueAt, imageUrl });
+                        // stage existent (posibil redenumit / mutat): daca s-a schimbat nume sau data,
+                        // refacem textul ca sa nu ramana numele/data veche in caption
+                        const changed = st.name !== orig || toIsoDate(prev.dueAt) !== toIsoDate(st.date);
+                        stagePosts.push({
+                            ...prev,
+                            title: st.name,
+                            text: changed ? stageText(st, ch.channelService) : prev.text,
+                            dueAt: due || prev.dueAt,
+                            imageUrl
+                        });
                         continue;
                     }
 
                     // stage nou => postare noua pe fiecare platforma
                     if (!due || due < new Date()) continue;
-                    if (service === 'instagram' && !imageUrl) continue;
-
-                    const rawText = `${st.name} - ${finalName}, ${fmtShort(st.date)}. ${description}`.trim();
-                    const captions = generateCaptionsForPlatforms(finalName, rawText, event.tags || []);
-                    let text = captions[service]
-                        || (service === 'twitter' ? captions.x : null)
-                        || captions.facebook;
-                    if ((service === 'twitter' || service === 'x') && text.length > 280) {
-                        text = text.slice(0, 277) + '...';
-                    }
 
                     stagePosts.push({
                         title: st.name,
-                        text,
+                        text: stageText(st, ch.channelService),
                         channelId: ch.channelId,
                         channelName: ch.channelName,
                         channelService: ch.channelService,
-                        bufferPostId: 1,
+                        bufferPostId: null,
                         dueAt: due,
                         imageUrl,
                         status: 'scheduled'
@@ -477,25 +527,37 @@ app.put('/api/events/:id', async (req, res) => {
             finalPosts = stagePosts;
         }
 
-        // to do decomm
-        // // 1. sterge din Buffer postarile vechi
-        // for (const old of event.posts) await deleteBufferPost(req, old.bufferPostId);
+        // ---- sincronizare cu Buffer ----
+        const now = new Date();
 
-        // // 2. recreeaza-le cu datele noi
-        // for (const np of nextPosts) {
-        //     if (np.status !== 'scheduled' || !np.dueAt || np.dueAt < new Date()) continue;
-        //     const r = await createBufferPost(req, {
-        //         text: np.text,
-        //         channelId: np.channelId,
-        //         service: np.channelService.toLowerCase(),
-        //         dueAt: np.dueAt,
-        //         imageUrl: np.imageUrl
-        //     });
-        //     np.bufferPostId = r.id;
-        //     np.status = r.id ? 'scheduled' : r.error;
-        // }
+        // 1. sterge din Buffer postarile viitoare vechi (inclusiv cele scoase din finalPosts)
+        let bufferFailed = await deleteFromBuffer(req, event.posts);
 
-        event.name = name || event.name;
+        // 2. recreeaza din ce se salveaza efectiv in DB
+        for (const np of finalPosts) {
+            if (np.status !== 'scheduled' || !np.dueAt || np.dueAt < now) continue;
+
+            const blocker = instagramBlocker(np.channelService, np.imageUrl);
+            if (blocker) {
+                np.bufferPostId = null;
+                np.status = `skipped (${blocker})`;
+                bufferFailed++;
+                continue;
+            }
+
+            const r = await safeCreateBufferPost(req, {
+                text: np.text,
+                channelId: np.channelId,
+                service: String(np.channelService).toLowerCase(),
+                dueAt: np.dueAt,
+                imageUrl: np.imageUrl
+            });
+            np.bufferPostId = r.id;
+            np.status = r.id ? 'scheduled' : r.error;
+            if (!r.id) bufferFailed++;
+        }
+
+        event.name = finalName;
         event.description = description;
         event.template = templateName;
         event.poster = poster;
@@ -504,87 +566,67 @@ app.put('/api/events/:id', async (req, res) => {
         event.posts = finalPosts;
 
         await event.save();
-        // console.log(event);
-        res.json({ success: true, event: { id: event._id, name: event.name } });
+        res.json({ success: true, event: { id: event._id, name: event.name }, bufferFailed });
     } catch (e) {
-        res.status(500).json({ error: e.message });
+        res.status(e.status || 500).json({ error: e.message });
     }
 });
 
 // sterge intreg event-ul
-app.delete('/api/events/:id', async (req, res) => {
+app.delete('/api/events/:id', requireBuffer, lockEvent, async (req, res) => {
     try {
-        if (!req.session.buffer || !req.session.userId) {
-            return res.status(401).json({ error: 'Not connected' });
-        }
-
         const event = await Event.findOne({ _id: req.params.id, userId: req.session.userId });
         if (!event) return res.status(404).json({ error: 'Event not found' });
 
-        // to do: apelul GraphQL catre API-ul Buffer
-        // for (const p of event.posts) await deleteBufferPost(req, p.bufferPostId);
+        const bufferFailed = await deleteFromBuffer(req, event.posts);
 
         await event.deleteOne();
-        res.json({ success: true, message: 'Event deleted successfully' });
+        res.json({ success: true, message: 'Event deleted successfully', bufferFailed });
     } catch (e) {
-        res.status(500).json({ error: e.message });
+        res.status(e.status || 500).json({ error: e.message });
     }
 });
 
 // sterge o singura postare dintr-un eveniment
-app.delete('/api/events/:id/posts/:postId', async (req, res) => {
+app.delete('/api/events/:id/posts/:postId', requireBuffer, lockEvent, async (req, res) => {
     try {
-        if (!req.session.buffer || !req.session.userId) {
-            return res.status(401).json({ error: 'Not connected' });
-        }
-
         const event = await Event.findOne({ _id: req.params.id, userId: req.session.userId });
         if (!event) return res.status(404).json({ error: 'Event not found' });
 
         const post = event.posts.id(req.params.postId);
         if (!post) return res.status(404).json({ error: 'Post not found' });
 
-        // to do: apelul GraphQL catre API-ul Buffer (sterge post.bufferPostId)
-        // await deleteBufferPost(req, post.bufferPostId);
+        const bufferFailed = await deleteFromBuffer(req, [post]);
 
         post.deleteOne();
         await event.save();
-        res.json({ success: true });
+        res.json({ success: true, bufferFailed });
     } catch (e) {
-        res.status(500).json({ error: e.message });
+        res.status(e.status || 500).json({ error: e.message });
     }
 });
 
 // sterge toate postarile de pe o platforma
-app.delete('/api/events/:id/platform/:service', async (req, res) => {
+app.delete('/api/events/:id/platform/:service', requireBuffer, lockEvent, async (req, res) => {
     try {
-        if (!req.session.buffer || !req.session.userId) {
-            return res.status(401).json({ error: 'Not connected' });
-        }
-
         const event = await Event.findOne({ _id: req.params.id, userId: req.session.userId });
         if (!event) return res.status(404).json({ error: 'Event not found' });
 
         const service = req.params.service.toLowerCase();
         const toDelete = event.posts.filter(p => (p.channelService || '').toLowerCase() === service);
 
-        // to do: apelul GraphQL catre API-ul Buffer (sterge fiecare toDelete[i].bufferPostId)
-        // for (const p of toDelete) await deleteBufferPost(req, p.bufferPostId);
+        const bufferFailed = await deleteFromBuffer(req, toDelete);
 
         event.posts = event.posts.filter(p => (p.channelService || '').toLowerCase() !== service);
         await event.save();
-        res.json({ success: true, deleted: toDelete.length });
+        res.json({ success: true, deleted: toDelete.length, bufferFailed });
     } catch (e) {
-        res.status(500).json({ error: e.message });
+        res.status(e.status || 500).json({ error: e.message });
     }
 });
 
-app.post('/api/events/:id/generate', async (req, res) => {
+app.post('/api/events/:id/generate', requireBuffer, lockEvent, async (req, res) => {
     try {
-        if (!req.session.buffer || !req.session.userId) {
-            return res.status(401).json({ error: 'Not connected' });
-        }
-
         const event = await Event.findOne({ _id: req.params.id, userId: req.session.userId });
         if (!event) return res.status(404).json({ error: 'Event not found' });
 
@@ -611,9 +653,7 @@ app.post('/api/events/:id/generate', async (req, res) => {
             : t.posts;
         const tplByTitle = new Map((templatePosts || []).map(p => [p.title, p]));
 
-        // to do
-        // const base = process.env.PUBLIC_BASE_URL || `${req.protocol}://${req.get('host')}`;
-        const base = `${req.protocol}://${req.get('host')}`;
+        const base = process.env.PUBLIC_BASE_URL || `${req.protocol}://${req.get('host')}`;
         const fmtDate = d => new Date(d).toLocaleDateString('en-GB', { day: 'numeric', month: 'long' });
 
         // surse: cate una pentru fiecare (titlu + data), le folosim doar pentru titlu si data
@@ -630,9 +670,10 @@ app.post('/api/events/:id/generate', async (req, res) => {
         try {
             for (const src of sources.values()) {
                 const tp = tplByTitle.get(src.title);
+                // fara sablon (ex: stage-uri) refacem textul de baza, ca sa nu imbricam captionul altei platforme
                 const rawText = tp
                     ? (typeof tp.text === 'function' ? tp.text({ name, description, dates }) : tp.text)
-                    : (src.text || '');
+                    : `${src.title} - ${name}, ${fmtDate(src.dueAt)}. ${description}`.trim();
                 const captions = generateCaptionsForPlatforms(name, rawText, tags);
 
                 const posterDescription = (t.kind === 'single-stage' && src.title === 'Thank you')
@@ -644,9 +685,11 @@ app.post('/api/events/:id/generate', async (req, res) => {
                     eyebrow: name,
                     headline: src.title,
                     description: posterDescription,
-                    line: tp?.lineDate
-                        ? fmtDate(tp.lineDate)
-                        : (tp && tp.days <= 0 && dates[tp.at] ? fmtDate(dates[tp.at]) : '')
+                    line: tp
+                        ? (tp.lineDate
+                            ? fmtDate(tp.lineDate)
+                            : (tp.days <= 0 && dates[tp.at] ? fmtDate(dates[tp.at]) : ''))
+                        : fmtDate(src.dueAt)
                 })}` : null;
 
                 for (const ch of chans) {
@@ -657,36 +700,26 @@ app.post('/api/events/:id/generate', async (req, res) => {
                         skipped.push(`${src.title} (${ch.name}: date passed)`);
                         continue;
                     }
-                    if (service === 'instagram' && !imageUrl) {
-                        skipped.push(`${src.title} (${ch.name}: needs a poster)`);
+                    const blocker = instagramBlocker(service, imageUrl);
+                    if (blocker) {
+                        skipped.push(`${src.title} (${ch.name}: ${blocker})`);
                         continue;
                     }
-                    // to do
-                    // if (service === 'instagram' && /localhost|127\.0\.0\.1/i.test(imageUrl)) {
-                    //     skipped.push(`${src.title} (${ch.name}: image URL is not public)`);
-                    //     continue;
-                    // }
 
-                    let text = captions[service]
-                        || (service === 'twitter' ? captions.x : null)
-                        || captions.facebook;
-                    if ((service === 'twitter' || service === 'x') && text.length > 280) {
-                        text = text.slice(0, 277) + '...';
+                    const text = pickCaption(captions, service);
+
+                    const r = await safeCreateBufferPost(req, {
+                        text,
+                        channelId: ch.id,
+                        service,
+                        dueAt: due,
+                        imageUrl
+                    });
+
+                    if (!r.id) {
+                        skipped.push(`${src.title} (${ch.name}: ${r.error || 'Buffer error'})`);
+                        continue;
                     }
-
-                    // to do
-                    // const r = await createBufferPost(req, {
-                    //     text,
-                    //     channelId: ch.id,
-                    //     service,
-                    //     dueAt: due,
-                    //     imageUrl
-                    // });
-
-                    // if (!r.id) {
-                    //     skipped.push(`${src.title} (${ch.name}: ${r.error || 'Buffer error'})`);
-                    //     continue;
-                    // }
 
                     added.push({
                         title: src.title,
@@ -694,8 +727,7 @@ app.post('/api/events/:id/generate', async (req, res) => {
                         channelId: ch.id,
                         channelName: ch.name,
                         channelService: ch.service,
-                        // bufferPostId: r.id,
-                        bufferPostId: 1,
+                        bufferPostId: r.id,
                         dueAt: due,
                         imageUrl: imageUrl || '',
                         status: 'scheduled'
@@ -803,7 +835,7 @@ function withPlatformPostingTime(dateLike, channelService) {
     return new Date(`${datePart}T${hh}:${mm}:00.000Z`);
 }
 
-app.post('/api/events', async (req, res) => {
+app.post('/api/events', requireBuffer, async (req, res) => {
     const {
         name,
         description = '',
@@ -817,17 +849,12 @@ app.post('/api/events', async (req, res) => {
 
     const channelIds = channels.map(id => String(id).split('|')[0]);
 
-    if (!req.session.buffer || !req.session.userId) {
-        return res.status(401).json({ error: 'Not connected' });
-    }
     if (poster && !Object.hasOwn(posterTemplates, poster)) {
         return res.status(400).json({ error: 'Unknown poster design' });
     }
-    
+
     const t = eventTemplates[template];
-    // console.log(t);
     const chans = (req.session.channels || []).filter(c => channelIds.includes(c.id));
-    // console.log(chans, channelIds);
     if (!t || !chans.length) return res.status(400).json({ error: 'Pick a template and a channel' });
 
     const results = [];
@@ -835,7 +862,7 @@ app.post('/api/events', async (req, res) => {
     const fmtDate = d => new Date(d).toLocaleDateString('en-GB', { day: 'numeric', month: 'long' });
     const hasInstagram = chans.some(ch => ch.service === 'instagram');
 
-    if (poster && hasInstagram && /localhost|127\.0\.0\.1/i.test(base)) {
+    if (poster && hasInstagram && isLocalUrl(base)) {
         return res.status(400).json({
             error: 'Instagram posts with images require a public image URL. Set PUBLIC_BASE_URL to a public HTTPS domain (for example via a tunnel).'
         });
@@ -858,9 +885,9 @@ app.post('/api/events', async (req, res) => {
 
         for (const p of templatePosts) {
             let baseDueDate = p.dueDate || dates[p.at] || '';
-            if (!p.dueDate && baseDueDate) {
+            if (!p.dueDate && baseDueDate && DATE_SHIFT_DAYS) {
                 const shifted = new Date(`${baseDueDate}T12:00:00.000Z`);
-                shifted.setUTCDate(shifted.getUTCDate() + 30);
+                shifted.setUTCDate(shifted.getUTCDate() + DATE_SHIFT_DAYS);
                 baseDueDate = shifted.toISOString().slice(0, 10);
             }
 
@@ -870,11 +897,10 @@ app.post('/api/events', async (req, res) => {
             }
 
             const rawPostText = typeof p.text === 'function' ? p.text({ name, description, dates }) : p.text;
-            const platformCaptions = await generateCaptionsForPlatforms(name, rawPostText, tags);
+            const platformCaptions = generateCaptionsForPlatforms(name, rawPostText, tags);
 
             for (const ch of chans) {
-                const serviceKey = ch.service.toLowerCase();
-                let text = platformCaptions[serviceKey] || platformCaptions.facebook || rawPostText;
+                const text = pickCaption(platformCaptions, ch.service);
                 const due = withPlatformPostingTime(baseDueDate, ch.service);
                 if (!due || Number.isNaN(due.getTime()) || due < new Date()) {
                     results.push({ title: p.title, channel: ch.name, status: 'skipped (date passed)' });
@@ -892,24 +918,21 @@ app.post('/api/events', async (req, res) => {
                     line: p.lineDate ? fmtDate(p.lineDate) : (p.days <= 0 ? fmtDate(dates[p.at]) : '')
                 })}` : null;
 
-                // to do - decomenteaza
-                // const r = await createBufferPost(req, {
-                //     text, channelId: ch.id, service: ch.service, dueAt: due, imageUrl
-                // });
+                const blocker = instagramBlocker(ch.service, imageUrl);
+                if (blocker) {
+                    results.push({ title: p.title, channel: ch.name, status: `skipped (${blocker})` });
+                    continue;
+                }
 
-                // results.push({
-                //     title: p.title, text, channel: ch.name, channelId: ch.id, channelService: ch.service,
-                //     bufferPostId: r.id,
-                //     dueAt: due, image: imageUrl,
-                //     status: r.id ? 'scheduled' : r.error
-                // });
+                const r = await safeCreateBufferPost(req, {
+                    text, channelId: ch.id, service: ch.service.toLowerCase(), dueAt: due, imageUrl
+                });
 
-                results.push({ title: p.title, text, channel: ch.name, channelId: ch.id, channelService: ch.service, 
-                    bufferPostId: 1,
-                    // bufferPostId: r.post?.id, 
-                    dueAt: due, image: imageUrl, 
-                    status: 'scheduled'
-                    // status: r.post ? 'scheduled' : r.message 
+                results.push({
+                    title: p.title, text, channel: ch.name, channelId: ch.id, channelService: ch.service,
+                    bufferPostId: r.id,
+                    dueAt: due, image: imageUrl,
+                    status: r.id ? 'scheduled' : r.error
                 });
             }
         }
@@ -1020,6 +1043,7 @@ app.get('/api/poster.png', async (req, res) => {
 
 
 function start() {
+    for (const key of Object.keys(posterTemplates)) getBg(key).catch(() => {});
     if (process.env.LOCAL_HTTPS === '1') {
         https.createServer({
             key: fs.readFileSync('localhost-key.pem'),

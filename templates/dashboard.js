@@ -490,7 +490,7 @@
             await reloadAfterDelete();
         });
 
-        form.addEventListener('submit', async e => {
+        form.onsubmit = async e => {
             e.preventDefault();
             const formData = new FormData(e.target);
             const result = {
@@ -581,31 +581,39 @@
                 return;
             }
 
-            const saveResult = await fetch(`/api/events/${encodeURIComponent(selectedEventId)}`, {
-                method: 'PUT',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify(result)
-            });
+            const saveBtn = form.querySelector('button[type="submit"]');
+            const saveLabel = saveBtn ? saveBtn.textContent : 'Save changes';
+            if (saveBtn) { saveBtn.disabled = true; saveBtn.textContent = 'Saving changes...'; }
 
-            const body = await saveResult.json().catch(() => ({}));
-            if (!saveResult.ok) {
-                alert(body.error || 'Could not save changes.');
-                return;
+            try {
+                    const saveResult = await fetch(`/api/events/${encodeURIComponent(selectedEventId)}`, {
+                        method: 'PUT',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify(result)
+                    });
+
+                    const body = await saveResult.json().catch(() => ({}));
+                    if (!saveResult.ok) {
+                        alert(body.error || 'Could not save changes.');
+                        return;
+                    }
+
+                    modalEditMode = false;
+                    const details = await loadEventDetails(selectedEventId);
+                    editEventState = details;
+                    modalPosts = Array.isArray(details.posts) ? details.posts.filter(Boolean) : [];
+                    modalPlatform = getGroupedModalPosts(modalPosts)[0]?.key || '';
+                    modalIndex = 0;
+                    $('event-modal-title').textContent = details.name;
+                    renderPlatformTabs();
+                    renderModalSlide();
+                    renderEditPanel();
+                    syncModalEditorVisibility();
+                    init();
+                } finally {
+            if (saveBtn) { saveBtn.disabled = false; saveBtn.textContent = saveLabel; }
             }
-
-            modalEditMode = false;
-            const details = await loadEventDetails(selectedEventId);
-            editEventState = details;
-            modalPosts = Array.isArray(details.posts) ? details.posts.filter(Boolean) : [];
-            modalPlatform = getGroupedModalPosts(modalPosts)[0]?.key || '';
-            modalIndex = 0;
-            $('event-modal-title').textContent = details.name;
-            renderPlatformTabs();
-            renderModalSlide();
-            renderEditPanel();
-            syncModalEditorVisibility();
-            init();
-        });
+        };
     }
 
     async function loadEventDetails(eventId) {
